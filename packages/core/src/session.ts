@@ -130,10 +130,11 @@ export function createSessionManager({
 		return (await allowSession(user)) === true;
 	}
 
-	// Verify the cookie, host policy, lifetimes, and revocation before using it.
-	// A store read failure propagates so sign-out can be retried.
-	async function readActive(
+	// An idle or policy-denied copy can still identify its own session for
+	// revocation. Only access checks may authorize using that session.
+	async function readSession(
 		cookies: Map<string, string>,
+		purpose: "access" | "sign-out",
 		onStoreError?: (error: unknown) => void,
 	): Promise<SessionResolution> {
 		const sealed = readChunked(cookies, name());
@@ -149,8 +150,7 @@ export function createSessionManager({
 		const now = Math.floor(Date.now() / 1000);
 		if (
 			now - session.issuedAt > maxAgeSeconds ||
-			now - session.lastSeenAt > idleSeconds ||
-			!(await isAllowed(session.user))
+			(purpose === "access" && (now - session.lastSeenAt > idleSeconds || !(await isAllowed(session.user))))
 		) {
 			return { session: null, setCookies: clear(cookies) };
 		}
@@ -178,7 +178,7 @@ export function createSessionManager({
 		bound: <T>(start: () => Promise<T>) => Promise<T> = (start) => start(),
 		context?: OidcCallContext,
 	): Promise<SessionResolution> {
-		const checked = await readActive(cookies, (error) => onError(error, "revocation-read"));
+		const checked = await readSession(cookies, "access", (error) => onError(error, "revocation-read"));
 		const { session } = checked;
 		if (!session) return checked;
 		const now = Math.floor(Date.now() / 1000);
@@ -227,7 +227,7 @@ export function createSessionManager({
 		}
 	}
 
-	return { isAllowed, readActive, resolve, write, clear };
+	return { isAllowed, readSession, resolve, write, clear };
 }
 
 export type SessionManager = ReturnType<typeof createSessionManager>;

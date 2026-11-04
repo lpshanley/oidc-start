@@ -534,6 +534,48 @@ test.each([
 	).rejects.toBe(failure);
 });
 
+test("an idle cookie can revoke its still-active copy only for this sign-in", async () => {
+	const base = Date.now();
+	vi.useFakeTimers({ toFake: ["Date"], now: base });
+	const revoked = new Set<string>();
+	const revokeAllFor = vi.fn();
+	const auth = createOidcCore({
+		allowSession, environment: () => env, sessionIdleSeconds: 60, sessionMaxAgeSeconds: 120,
+		revocations: { ...revocations, revokeAllFor, isRevoked: async ({ sid }) => revoked.has(sid),
+			revoke: async (sid) => { revoked.add(sid); } },
+	});
+	try {
+		const owner = new Map<string, string>();
+		const start = await auth.signIn(request("/"), owner);
+		apply(owner, start.setCookies);
+		const state = new URL(start.url).searchParams.get("state");
+		const callback = await auth.callback(request(`/callback?code=c&state=${state}`, owner), owner);
+		expect(callback.ok).toBe(true);
+		apply(owner, callback.setCookies);
+		vi.setSystemTime(base + 40_000);
+		const copy = apply(new Map(owner), (await auth.resolve(request("/", owner))).setCookies);
+		vi.setSystemTime(base + 61_000);
+		const idle = await auth.resolve(request("/", owner));
+		expect(idle.session).toBeNull();
+		const active = await auth.resolve(request("/", copy));
+		expect(active.session?.user.sub).toBe("alice");
+		await expect(auth.signOut(request("/logout", owner), owner, idle.session, undefined, true))
+			.rejects.toThrow("active session");
+		expect(revokeAllFor).not.toHaveBeenCalled();
+		const out = await auth.signOut(request("/logout", owner), owner, idle.session);
+		expect(apply(owner, out.setCookies).size).toBe(0);
+		expect(revoked).toEqual(new Set([active.session!.sid]));
+		expect((await auth.resolve(request("/", copy))).session).toBeNull();
+
+		revoked.clear();
+		vi.setSystemTime(base + 121_000);
+		await auth.signOut(request("/logout", copy), copy, null);
+		expect(revoked.size).toBe(0);
+	} finally {
+		vi.useRealTimers();
+	}
+});
+
 test.each([false, true])("sign-out can be retried after a revocation read outage (everywhere=%s)", async (everywhere) => {
 	let offline = true;
 	const revoked = new Set<string>();
