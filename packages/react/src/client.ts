@@ -6,14 +6,14 @@ import { getSignInUrl, signOut } from "./functions.js";
 const AuthContext = createContext<AuthSession | undefined>(undefined);
 
 /** Supply the root loader's getAuth() result for SSR and client navigation. */
-export function OidcAuthProvider({ auth, children }: { auth: AuthSession; children: ReactNode }) {
+export function AuthProvider({ auth, children }: { auth: AuthSession; children: ReactNode }) {
 	return createElement(AuthContext.Provider, { value: auth }, children);
 }
 
 /** The user supplied by the current root loader, or null when signed out. */
 export function useUser() {
 	const auth = useContext(AuthContext);
-	if (!auth) throw new Error("Auth hooks require an OidcAuthProvider.");
+	if (!auth) throw new Error("Wrap components that use auth hooks in <AuthProvider>.");
 	return auth.user;
 }
 

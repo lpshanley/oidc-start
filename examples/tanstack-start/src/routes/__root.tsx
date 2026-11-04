@@ -1,4 +1,4 @@
-import { OidcAuthProvider } from "@lpshanley/oidc-start-react/client";
+import { AuthProvider } from "@lpshanley/oidc-start-react/client";
 import { getAuth } from "@lpshanley/oidc-start-react/functions";
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 
@@ -12,7 +12,7 @@ function Root() {
 	return (
 		<html lang="en">
 			<head><HeadContent /></head>
-			<body><OidcAuthProvider auth={auth}><Outlet /></OidcAuthProvider><Scripts /></body>
+			<body><AuthProvider auth={auth}><Outlet /></AuthProvider><Scripts /></body>
 		</html>
 	);
 }
