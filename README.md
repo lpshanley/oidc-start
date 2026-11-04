@@ -13,10 +13,10 @@ The host app decides which accounts may hold a session, supplies persistent revo
 
 The packages require Node.js 22.12 or newer. Keep the host's React and TanStack installations. The adapter's peer ranges are `@tanstack/react-start@^1.169.2` and `@tanstack/react-router@^1.170.44`. The [working example](examples/tanstack-start) uses Start 1.169.4 and Router 1.170.46.
 
-Install the published prerelease in the consuming app:
+Install both packages from npm in the consuming app.
 
 ```sh
-pnpm add @lpshanley/oidc-start-core@next @lpshanley/oidc-start-react@next
+pnpm add @lpshanley/oidc-start-core @lpshanley/oidc-start-react
 ```
 
 To try unreleased changes from this checkout, use two local tarballs instead. From the **library root**, use Node 26 and pnpm 12.6.0. Set `app_dir` to the absolute path of the consuming app.

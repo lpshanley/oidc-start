@@ -9,7 +9,7 @@ This guide adds two routes to an existing app. The home page at `/` shows who is
 Use Node.js 22.12 or newer. Your app supplies `@tanstack/react-start@^1.169.2` and `@tanstack/react-router@^1.170.44`. Install both OIDC packages because your app imports the core directly.
 
 ```sh
-npm install @lpshanley/oidc-start-react@next @lpshanley/oidc-start-core@next
+npm install @lpshanley/oidc-start-react @lpshanley/oidc-start-core
 ```
 
 Register a confidential web client with your OIDC provider. If your app runs at `http://localhost:5173`, register these exact URLs. Use your public HTTPS origin in production.

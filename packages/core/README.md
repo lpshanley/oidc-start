@@ -6,10 +6,10 @@ Building a TanStack Start app? The React adapter connects the core to Start’s 
 
 ## Install and register your app
 
-Use Node.js 22.12 or newer with ES modules. Install the current prerelease from npm.
+Use Node.js 22.12 or newer with ES modules. Install the package from npm.
 
 ```sh
-npm install @lpshanley/oidc-start-core@next
+npm install @lpshanley/oidc-start-core
 ```
 
 Register a **confidential web client** with your OIDC provider. For the example below, register `http://localhost:5173/callback` as the sign-in redirect URI and `http://localhost:5173/` as the post-logout redirect URI. In production, use your app’s public HTTPS origin for both.
