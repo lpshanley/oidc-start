@@ -125,6 +125,16 @@ The buttons above use server functions. If you prefer ordinary links and forms, 
 
 In a server handler, import `getOidcContext` from `@lpshanley/oidc-start-react/server` to access the resolved session and core for the current request. Use `getAuth()` from `/functions` when a loader or component only needs the user.
 
+### Protect route navigation
+
+Mount `GET: handleSignInRoute()` at a local path such as `/sign-in`. A protected route can then use the following option with `requireAuth` from `@lpshanley/oidc-start-react/functions`.
+
+```ts
+beforeLoad: ({ location }) => requireAuth({ signInPath: '/sign-in', returnPathname: location.href })
+```
+
+The helper reads the session on the server. A guest follows a document redirect to the sign-in route. A signed-in user is available as `Route.useRouteContext().user`. Enforce authorization in every server function or endpoint that serves private data, including those called by the guarded route.
+
 ### Customize callback failures
 
 Pass `onError({ reason, request })` to `handleCallbackRoute` to return a custom response. It takes precedence over `errorRedirectUrl`. A provider cancellation is `access_denied`, and a missing verifier (for example after its cookie expires) is `sign_in_expired`. Other reasons are `invalid_callback`, `invalid_state`, `provider_error`, `token_exchange_failed`, and `session_failed`. The middleware still clears the failed flow's verifier. A rejection by your own `allowSession` policy takes its separate 403 path.
