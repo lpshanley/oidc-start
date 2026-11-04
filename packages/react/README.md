@@ -108,7 +108,18 @@ For navigation links, import `SignedIn` and `SignedOut` from that same entry. In
 
 **Try it.** Open `/` in a fresh browser session and choose **Sign in**. After the provider redirects you back, your name should appear and survive a reload. Choose **Sign out**, finish logout at the provider if prompted, and reload. You should see **Sign in** again.
 
-To return someone to a specific page, pass a local path when starting sign-in, for example `getSignInUrl({ data: { returnPathname: '/account' } })`.
+### Sign in and return here
+
+From a page with a sign-in button, pass its local pathname when the user clicks. The server sanitizes the path and binds it to this sign-in flow. Omitting the option keeps the default destination of `/`.
+
+```tsx
+function SignInHere() {
+  const { signIn } = useAuth()
+  return <button onClick={() => signIn({ returnPathname: window.location.pathname })}>Sign in</button>
+}
+```
+
+If the page needs its current filters or anchor after sign-in, append `window.location.search` or `window.location.hash` to the pathname. From a dedicated login page, pass the intended destination instead. The server function accepts the same option, for example `getSignInUrl({ data: { returnPathname: '/account' } })`.
 
 To prefill an account, pass `loginHint`. For an account picker, call `signIn({ prompt: 'select_account' })`. The hook, `getSignInUrl({ data: options })`, and `handleSignInRoute(options)` accept the same sign-in options. Supported prompts are `login`, `consent`, `select_account`, and `none`. Omitting `prompt` leaves the provider's usual SSO behavior in place.
 
