@@ -1,6 +1,6 @@
 import { createContext, createElement, useContext, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import type { AuthSession, SignInOptions } from "@lpshanley/oidc-start-core/models";
+import { hasRole, type AuthSession, type SignInOptions } from "@lpshanley/oidc-start-core/models";
 import { getSignInUrl, signOut } from "./functions.js";
 
 const AuthContext = createContext<AuthSession | undefined>(undefined);
@@ -17,6 +17,7 @@ export function useAuth() {
 
 	return {
 		user: auth.user,
+		hasRole: (role: string) => auth.user !== null && hasRole(auth.user, role),
 		async signIn(options?: SignInOptions) {
 			window.location.assign(await getSignInUrl({ data: options }));
 		},

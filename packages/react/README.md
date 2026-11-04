@@ -100,6 +100,8 @@ For shared UI such as an account menu, load `getAuth()` in the root route and wr
 
 Call `signOut()` for the current session or `signOut({ everywhere: true })` for all of this user's sessions in this app. Both use the same CSRF-protected POST server function. If the revocation store is unavailable, the server returns 503 so the user can retry.
 
+Use `useAuth().hasRole('admin')` to show role-specific UI. It returns false for signed-out users and sessions without a roles claim. Check authorization again in the server handler that reads private data or performs the action.
+
 **Try it.** Open `/` in a fresh browser session and choose **Sign in**. After the provider redirects you back, your name should appear and survive a reload. Choose **Sign out**, finish logout at the provider if prompted, and reload. You should see **Sign in** again.
 
 To return someone to a specific page, pass a local path when starting sign-in, for example `getSignInUrl({ data: { returnPathname: '/account' } })`.
