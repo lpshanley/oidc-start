@@ -1,5 +1,22 @@
 # @lpshanley/oidc-start-react
 
+## 0.4.0
+
+### Minor Changes
+
+- 13fa2a5: Display safe callback messages with authErrorMessage, including for untrusted auth_error query values.
+- b0eb61a: Render conditional UI with the SignedIn and SignedOut components.
+- fae9cad: Check the current user's role with useAuth().hasRole(role).
+- 9c8e9a1: Support signing out of all of the current user's app sessions through the React hook and POST server function.
+- c5040ab: Rename OidcAuthProvider to AuthProvider. When upgrading from 0.3.x, update the import from @lpshanley/oidc-start-react/client and the JSX tags. The props are unchanged.
+- 776e0b2: Guard route navigation and provide the signed-in user to descendant routes with requireAuth.
+- d54bf9c: Guard navigation with requireRecentAuth and carry the required login age through the sign-in route.
+- 603834e: Read the loader-backed user with useUser().
+
+### Patch Changes
+
+- @lpshanley/oidc-start-core@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
