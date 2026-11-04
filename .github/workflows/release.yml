@@ -51,13 +51,17 @@ jobs:
           path: ${{ runner.temp }}/npm-tarballs/*.tgz
           if-no-files-found: error
 
-  publish:
+  stage:
     if: github.event_name == 'push'
     needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [core, react]
     runs-on: ubuntu-latest
     environment: npm
     concurrency:
-      group: npm-publish
+      group: npm-stage-${{ matrix.package }}
       cancel-in-progress: false
     permissions:
       contents: read
@@ -75,5 +79,7 @@ jobs:
           artifact-ids: ${{ needs.prepare.outputs.artifact-id }}
           merge-multiple: true
           path: ${{ runner.temp }}/npm-tarballs
-      - name: Publish verified tarballs with npm trusted publishing
-        run: node scripts/npm-release.mjs publish "$GITHUB_REF_NAME" "$RUNNER_TEMP/npm-tarballs"
+      - name: Stage verified tarball for npm maintainer approval
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: node scripts/npm-release.mjs stage "$GITHUB_REF_NAME" "$RUNNER_TEMP/npm-tarballs" "$PACKAGE"
