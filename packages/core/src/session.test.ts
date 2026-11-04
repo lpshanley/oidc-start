@@ -33,7 +33,9 @@ const revocations = {
 	revokeIdpSession: vi.fn(),
 };
 
-function setup() {
+function setup(
+	allowSession = (user: Session["user"]) => !user.roles || user.roles.includes("stellar"),
+) {
 	const refresh = vi.fn<OidcProvider["refresh"]>();
 	const manager = createSessionManager({
 		cookieName: () => "sage_session",
@@ -41,7 +43,7 @@ function setup() {
 		maxAgeSeconds: 60 * 60 * 24 * 30,
 		idleSeconds: 60 * 60 * 12,
 		revocations,
-		allowSession: (u: Session["user"]) => !u.roles || u.roles.includes("stellar"),
+		allowSession,
 		password: () => password,
 		provider: () => ({ refresh }) as unknown as OidcProvider,
 	});
@@ -194,6 +196,20 @@ describe("session lifetime and revocation", () => {
 		const jar = await jarWith({ ...fresh, expiresAt: fresh.issuedAt + 2 * idleLimit });
 
 		at(fresh.lastSeenAt + idleLimit + 1);
+		const result = await manager.resolve(jar);
+
+		expect(result.session).toBeNull();
+		expect(apply(jar, result.setCookies).size).toBe(0);
+		expect(refresh).not.toHaveBeenCalled();
+	});
+
+	test("rechecks host access on a fresh session without refreshing", async () => {
+		let hasAccess = true;
+		const { manager, refresh } = setup(() => hasAccess);
+		const jar = await jarWith(fresh);
+		expect((await manager.resolve(jar)).session?.user.sub).toBe(user.sub);
+
+		hasAccess = false;
 		const result = await manager.resolve(jar);
 
 		expect(result.session).toBeNull();
