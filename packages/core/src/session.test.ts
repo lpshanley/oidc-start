@@ -206,6 +206,21 @@ describe("session manager", () => {
 		expect(retried.session?.refreshToken).toBe("refresh");
 	});
 
+	test("a late request cannot delete a peer's successful refresh", async () => {
+		const { manager, refresh } = setup();
+		const jar = await jarWith({ ...fresh, expiresAt: 1010 });
+		refresh.mockResolvedValueOnce({ roles: ["stellar"], accessToken: "renewed", expiresAt: 2000 });
+		const [success, late] = await Promise.all([
+			manager.resolve(jar),
+			manager.resolve(jar, undefined, { deadline: Date.now() - 1 }),
+		]);
+		expect(refresh).toHaveBeenCalledOnce();
+		expect(late).toEqual({ session: null, setCookies: [] });
+		apply(jar, success.setCookies);
+		apply(jar, late.setCookies);
+		expect((await manager.resolve(jar)).session?.accessToken).toBe("renewed");
+	});
+
 	test.each([
 		["the refresh fails", true],
 		["there is no refresh token", false],

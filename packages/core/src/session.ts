@@ -7,7 +7,8 @@ import {
 	writeChunked,
 } from "./cookies.js";
 import { authUserSchema } from "./models.js";
-import type { OidcProvider, RefreshedTokens } from "./provider.js";
+import { OidcDeadlineError, withinDeadline } from "./deadline.js";
+import { type OidcProvider, RefreshNotDispatched, type RefreshedTokens } from "./provider.js";
 import { RECENT_REFRESH_MS, sharedRefresh, type SessionRefreshCoordinator } from "./refresh.js";
 import type { SessionRevocations } from "./revocation.js";
 import { sealValue, unsealValue } from "./seal.js";
@@ -175,7 +176,6 @@ export function createSessionManager({
 	async function resolve(
 		cookies: Map<string, string>,
 		onError: (error: unknown, operation: "refresh" | "revocation-read") => void = () => {},
-		bound: <T>(start: () => Promise<T>) => Promise<T> = (start) => start(),
 		context?: OidcCallContext,
 	): Promise<SessionResolution> {
 		const checked = await readSession(cookies, "access", (error) => onError(error, "revocation-read"));
@@ -194,14 +194,15 @@ export function createSessionManager({
 		}
 		try {
 			const refreshToken = session.refreshToken;
-			const refreshedTokens = await bound(() => refreshCoordinator
-				? sharedRefresh(refreshCoordinator, {
+			const refreshedTokens = await withinDeadline(() => {
+				if (!refreshCoordinator) return refreshOnce(refreshToken, session.user.sub, context);
+				return sharedRefresh(refreshCoordinator, {
 					session,
 					until: session.issuedAt + maxAgeSeconds,
 					password: password(),
 					refresh: () => provider().refresh(refreshToken, session.user.sub, context),
-				})
-				: refreshOnce(refreshToken, session.user.sub, context));
+				});
+			}, context);
 			if (!refreshedTokens) return { session: null, setCookies: [] };
 			const { roles, email, ...tokens } = refreshedTokens;
 			const refreshed: Session = {
@@ -221,9 +222,9 @@ export function createSessionManager({
 			};
 		} catch (error) {
 			onError(error, "refresh");
-			// A peer may already have written the renewed cookie, even if this
-			// caller timed out. A failed coordinated refresh must never erase it.
-			return { session: null, setCookies: refreshCoordinator ? [] : clear(cookies) };
+			// A peer may already have renewed the cookie when this caller times out.
+			const preserveCookie = refreshCoordinator || error instanceof OidcDeadlineError || error instanceof RefreshNotDispatched;
+			return { session: null, setCookies: preserveCookie ? [] : clear(cookies) };
 		}
 	}
 

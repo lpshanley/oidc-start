@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { verifierCookieName } from "./state.js";
+import { OidcDeadlineError, withinDeadline } from "./deadline.js";
 
 const oidc = vi.hoisted(() => {
 	const metadata: Record<string, string> = {
@@ -45,9 +46,7 @@ vi.mock("openid-client", () => oidc);
 
 const {
 	createOidcCore,
-	OidcDeadlineError,
 	SessionAccessDeniedError,
-	withinDeadline,
 } = await import("./core.js");
 
 const env = {
