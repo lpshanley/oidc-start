@@ -1,5 +1,13 @@
 # @lpshanley/oidc-start-react
 
+## 0.4.3
+
+### Patch Changes
+
+- 2603765: On a successful account switch, discard the previous session's pending cookie writes so the next request uses the newly signed-in account.
+- cf4c567: Revoke a single session when its owner signs out with an idle but authentic cookie. A failed revocation preserves the cookie for retry, and account-wide sign-out requires an active session.
+- Update the paired core dependency to `@lpshanley/oidc-start-core@0.4.3`.
+
 ## 0.4.2
 
 ### Patch Changes

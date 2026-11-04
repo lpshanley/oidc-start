@@ -1,5 +1,14 @@
 # @lpshanley/oidc-start-core
 
+## 0.4.3
+
+### Patch Changes
+
+- cf4c567: Revoke a single session when its owner signs out with an idle but authentic cookie. A failed revocation preserves the cookie for retry, and account-wide sign-out requires an active session.
+- a0b767b: Return HTTP 503 when the provider's signing keys cannot be fetched during back-channel logout. Invalid logout tokens still receive HTTP 400.
+- 32b77a9: Preserve the session cookie when a refresh misses the request deadline or cannot be dispatched, allowing a concurrent successful refresh to take effect.
+- 3d7aea5: Pass an updated email from the refreshed ID token or UserInfo to the host access policy, including when multiple instances share a token refresh.
+
 ## 0.4.2
 
 ### Patch Changes
