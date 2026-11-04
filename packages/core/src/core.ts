@@ -230,7 +230,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			? [expire(verifierCookieName(prefix(), state))]
 			: [];
 		try {
-			if (!state || !url.searchParams.get("code")) {
+			if (!state || !(url.searchParams.get("code") || url.searchParams.get("error"))) {
 				throw new OidcStateError("missing");
 			}
 			const flow = await verifyCallbackState({

@@ -52,6 +52,7 @@ Mount these handlers at `GET /sign-in` and `GET /callback` in your server. The f
 
 ```ts
 import { SessionAccessDeniedError } from '@lpshanley/oidc-start-core'
+import { isAuthorizationDenied } from '@lpshanley/oidc-start-core/provider'
 import { auth } from './auth.server.js'
 
 function authHeaders(cookies: string[]) {
@@ -73,6 +74,9 @@ export async function callback(request: Request) {
   const result = await auth.callback(request, cookies)
   const headers = authHeaders([...setCookies, ...result.setCookies])
   if (!result.ok) {
+    if (isAuthorizationDenied(result.error)) {
+      return new Response('Authorization was declined.', { status: 403, headers })
+    }
     const denied = result.error instanceof SessionAccessDeniedError
     return new Response(denied ? 'Access denied.' : 'Please sign in again.', {
       status: denied ? 403 : 400, headers,
