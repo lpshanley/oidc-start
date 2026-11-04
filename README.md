@@ -13,7 +13,13 @@ The host app decides which accounts may hold a session, supplies persistent revo
 
 The packages require Node.js 22.12 or newer. Keep the host's React and TanStack installations. The adapter's peer ranges are `@tanstack/react-start@^1.169.2` and `@tanstack/react-router@^1.170.44`. The [working example](examples/tanstack-start) uses Start 1.169.4 and Router 1.170.46.
 
-Install the `0.1.0-next.0` prerelease from this checkout as two local tarballs. From the **library root**, use Node 26 and pnpm 12.6.0. Set `app_dir` to the absolute path of the consuming app.
+Install the published prerelease in the consuming app:
+
+```sh
+pnpm add @lpshanley/oidc-start-core@next @lpshanley/oidc-start-react@next
+```
+
+To try unreleased changes from this checkout, use two local tarballs instead. From the **library root**, use Node 26 and pnpm 12.6.0. Set `app_dir` to the absolute path of the consuming app.
 
 ```sh
 app_dir=/absolute/path/to/your-app
@@ -24,16 +30,16 @@ pnpm --filter @lpshanley/oidc-start-core pack --pack-destination "$app_dir/vendo
 pnpm --filter @lpshanley/oidc-start-react pack --pack-destination "$app_dir/vendor"
 ```
 
-In the **consuming app**, add this entry to `pnpm-workspace.yaml` (create the file if needed). The packed adapter depends on core by version. This override makes pnpm resolve that dependency to the same local tarball.
+In the **consuming app**, replace `VERSION` below with the package version in the generated filenames. Add this entry to `pnpm-workspace.yaml` (create the file if needed). The packed adapter depends on core by version. This override makes pnpm resolve that dependency to the same local tarball.
 
 ```yaml
 overrides:
-  '@lpshanley/oidc-start-core': 'file:./vendor/lpshanley-oidc-start-core-0.1.0-next.0.tgz'
+  '@lpshanley/oidc-start-core': 'file:./vendor/lpshanley-oidc-start-core-VERSION.tgz'
 ```
 
 ```sh
 cd "$app_dir"
-pnpm add ./vendor/lpshanley-oidc-start-core-0.1.0-next.0.tgz ./vendor/lpshanley-oidc-start-react-0.1.0-next.0.tgz
+pnpm add ./vendor/lpshanley-oidc-start-core-VERSION.tgz ./vendor/lpshanley-oidc-start-react-VERSION.tgz
 ```
 
 Keep both archives with the app's manifest and lockfile so CI can run a frozen install. If the app belongs to a larger pnpm workspace, put the override in the workspace root, make its tarball path relative to that root, and add both dependencies to the app package.
