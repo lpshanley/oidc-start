@@ -1,4 +1,3 @@
-import { errors } from "jose";
 import { withinDeadline } from "./deadline.js";
 import { randomNonce, randomPKCECodeVerifier, randomState } from "openid-client";
 import {
@@ -16,7 +15,7 @@ import {
 	parseCookies,
 	serializeCookie,
 } from "./cookies.js";
-import { LOGOUT_TOKEN_MAX_AGE_SECONDS, type LogoutTarget, LogoutTokenError } from "./logout-token.js";
+import { isInvalidLogoutToken, LOGOUT_TOKEN_MAX_AGE_SECONDS, type LogoutTarget } from "./logout-token.js";
 import { type AuthUser, sanitizeReturnPath, type SignInOptions, signInOptionsSchema } from "./models.js";
 import {
 	authorizationErrorCode,
@@ -473,11 +472,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				);
 			} catch (error) {
 				onError({ operation: "backchannel-logout", error, context });
-				const invalid =
-					error instanceof LogoutTokenError ||
-					(error instanceof errors.JOSEError &&
-						!(error instanceof errors.JWKSTimeout));
-				return { status: invalid ? 400 : 503 };
+				return { status: isInvalidLogoutToken(error) ? 400 : 503 };
 			}
 			// Retries must apply the original event, even after a new sign-in.
 			try {

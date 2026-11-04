@@ -464,11 +464,12 @@ test("ends the sessions a verified back-channel logout token names", async () =>
 	expect(revocations.revokeIdpSession).not.toHaveBeenCalled();
 });
 
-test.each(["sid", "sub"] as const)("redelivery preserves the original %s revocation after a storage outage", async (kind) => {
+test.each(["sid", "sub"] as const)("redelivery preserves the original %s revocation after key and storage outages", async (kind) => {
 	const { exportJWK, generateKeyPair, SignJWT } = await import("jose");
 	const { privateKey, publicKey } = await generateKeyPair("RS256");
 	const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256" };
-	vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [jwk] })));
+	vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [jwk] }))
+		.mockResolvedValueOnce(new Response(null, { status: 503 })));
 	Object.assign(oidc.metadata, {
 		issuer: env.OIDC_ISSUER,
 		jwks_uri: "https://idp.test/jwks/",
@@ -493,12 +494,18 @@ test.each(["sid", "sub"] as const)("redelivery preserves the original %s revocat
 		allowSession, revocations, environment: () => env, onError: vi.fn(),
 		sessionMaxAgeSeconds: 3600,
 	});
-	const deliver = () => auth.backchannelLogout(new Request("https://internal:3000/auth/backchannel-logout", {
+	const deliver = (logoutToken = token) => auth.backchannelLogout(new Request("https://internal:3000/auth/backchannel-logout", {
 		method: "POST",
-		body: new URLSearchParams({ logout_token: token }),
+		body: new URLSearchParams({ logout_token: logoutToken }),
 	}));
 
 	try {
+		expect(await deliver()).toEqual({ status: 503 });
+		expect(write).not.toHaveBeenCalled();
+		const [header, payload, signature] = token.split(".");
+		const badSignature = (signature.startsWith("A") ? "B" : "A") + signature.slice(1);
+		expect(await deliver(`${header}.${payload}.${badSignature}`)).toEqual({ status: 400 });
+		expect(write).not.toHaveBeenCalled();
 		expect(await deliver()).toEqual({ status: 503 });
 		expect(await deliver()).toEqual({ status: 200 });
 		vi.useFakeTimers({ toFake: ["Date"], now: (issuedAt + 120) * 1000 });
