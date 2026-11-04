@@ -139,6 +139,22 @@ The helper reads the session on the server. A guest follows a document redirect 
 
 Pass `onError({ reason, request })` to `handleCallbackRoute` to return a custom response. It takes precedence over `errorRedirectUrl`. A provider cancellation is `access_denied`, and a missing verifier (for example after its cookie expires) is `sign_in_expired`. Other reasons are `invalid_callback`, `invalid_state`, `provider_error`, `token_exchange_failed`, and `session_failed`. The middleware still clears the failed flow's verifier. A rejection by your own `allowSession` policy takes its separate 403 path.
 
+To show a message on your own login page, redirect the classified reason to a fixed local route.
+
+```ts
+GET: handleCallbackRoute({
+  onError: ({ reason }) => new Response(null, {
+    status: 303,
+    headers: {
+      Location: '/login?' + new URLSearchParams({ auth_error: reason }),
+      'Cache-Control': 'no-store',
+    },
+  }),
+})
+```
+
+On that page, import `authErrorMessage` from `@lpshanley/oidc-start-react`. Read `auth_error` from the route's search parameters and render `<p role="alert">{authErrorMessage(auth_error)}</p>` when the parameter is present. The helper selects fixed messages and gives unknown values a generic retry message. Host access denials keep their 403 response.
+
 ### Require a recent login
 
 Use `requireRecentAuth` from `@lpshanley/oidc-start-react/functions` in `beforeLoad` for a page that requires a recent provider login.

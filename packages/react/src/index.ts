@@ -14,3 +14,4 @@ export {
 	handleSignOutRoute,
 } from "./routes.js";
 export type { CallbackErrorReason } from "@lpshanley/oidc-start-core";
+export { authErrorMessage } from "./auth-error.js";
