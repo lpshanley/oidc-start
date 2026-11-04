@@ -15,10 +15,12 @@
     "react-dom": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "oidc-provider": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:"
   }

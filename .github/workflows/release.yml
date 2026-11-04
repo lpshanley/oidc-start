@@ -39,6 +39,10 @@ jobs:
             tag="v$(node -p "require('./packages/core/package.json').version")"
           fi
           node scripts/npm-release.mjs check "$tag" "$out"
+      - name: Test the packed libraries in Chromium
+        run: |
+          pnpm --filter oidc-start-example exec playwright install --with-deps chromium
+          bash scripts/check-packed-browser.sh "$RUNNER_TEMP/npm-tarballs"
       - name: Save verified tarballs
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

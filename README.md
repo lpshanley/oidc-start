@@ -71,7 +71,9 @@ Run `pnpm --filter oidc-start-example dev` after verification to try the example
 
 Changesets versions the two public packages together. Add a changeset for a user-facing change. For subsequent releases, use `pnpm changeset pre enter next` to enter the prerelease cycle, `pnpm version-packages` to apply changesets, and `pnpm changeset pre exit` before versioning for stable. Review and commit the manifest, lockfile and Changesets updates together. The release tag must match both package versions.
 
-**Before the first public release**, run the [Release to npm workflow](.github/workflows/release.yml) manually on `main`. Download its `npm-tarballs-*` artifact and use those two archives in a clean consumer app. Check development and production builds. The remaining browser test is a round trip against a local OIDC issuer: sign in, return through the callback, reload as the same user, sign out, and reload anonymously. Manual workflow runs only verify and pack.
+**Before the first public release**, run the [Release to npm workflow](.github/workflows/release.yml) manually on `main`. It installs the two release archives in a clean example app and tests them in Chromium against a local OIDC issuer, in development and production. The test signs in, reloads, follows the sign-out button through provider logout, and checks that replaying the original cookie leaves the app signed out. A passing manual run uploads the tested `npm-tarballs-*` artifact for review.
+
+To repeat the browser check locally, extract that artifact, run `pnpm --filter oidc-start-example exec playwright install chromium`, then run `bash scripts/check-packed-browser.sh /path/to/extracted/artifact` from the matching checkout.
 
 **One-time setup**
 
