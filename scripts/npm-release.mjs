@@ -12,6 +12,7 @@ assert.match(tag, /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.(0|[1-9]\
 const version = tag.slice(1);
 const distTag = version.includes("-next.") ? "next" : "latest";
 const registry = "https://registry.npmjs.org";
+const license = readFileSync(new URL("../LICENSE", import.meta.url), "utf8");
 
 // Inspect the archives that will be handed to npm, including pnpm's workspace substitution.
 const packages = ["core", "react"].map((part) => {
@@ -21,6 +22,8 @@ const packages = ["core", "react"].map((part) => {
 	assert.equal(manifest.name, name);
 	assert.equal(manifest.version, version, `Release tag must match ${name}`);
 	assert.equal(manifest.publishConfig?.access, "public");
+	assert.equal(manifest.license, "MIT");
+	assert.equal(execFileSync("tar", ["-xOzf", file, "package/LICENSE"], { encoding: "utf8" }), license);
 	assert.equal(manifest.repository?.url, "git+https://github.com/lpshanley/oidc-start.git");
 	assert.equal(manifest.repository.directory, `packages/${part}`);
 	if (part === "react") assert.equal(manifest.dependencies["@lpshanley/oidc-start-core"], version);
