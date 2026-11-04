@@ -16,8 +16,9 @@ import {
 	serializeCookie,
 } from "./cookies.js";
 import { LOGOUT_TOKEN_MAX_AGE_SECONDS, type LogoutTarget, LogoutTokenError } from "./logout-token.js";
-import { type AuthUser, sanitizeReturnPath } from "./models.js";
+import { type AuthUser, sanitizeReturnPath, type SignInOptions, signInOptionsSchema } from "./models.js";
 import {
+	authorizationErrorCode,
 	createProvider,
 	type OidcProvider,
 	type TokenSet,
@@ -75,9 +76,18 @@ export class SessionAccessDeniedError extends Error {
 	}
 }
 
+export type CallbackErrorReason =
+	| "invalid_callback"
+	| "sign_in_expired"
+	| "invalid_state"
+	| "access_denied"
+	| "provider_error"
+	| "token_exchange_failed"
+	| "session_failed";
+
 export type CallbackResult =
 	| { ok: true; location: string; setCookies: string[] }
-	| { ok: false; error: unknown; setCookies: string[] };
+	| { ok: false; reason: CallbackErrorReason | "session_access_denied"; error: unknown; setCookies: string[] };
 
 export type GrantResult =
 	| {
@@ -87,7 +97,7 @@ export type GrantResult =
 			returnPathname: string;
 			setCookies: string[];
 	  }
-	| { ok: false; error: unknown; setCookies: string[] };
+	| { ok: false; reason: CallbackErrorReason; error: unknown; setCookies: string[] };
 
 export type GrantRefresh =
 	| { status: "refreshed"; tokens: TokenSet }
@@ -175,7 +185,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		purpose: FlowPurpose,
 		request: Request,
 		cookies: Map<string, string>,
-		returnPathname: string | null | undefined,
+		options: SignInOptions,
 		context: OidcCallContext | undefined,
 	) {
 		const nonce = randomNonce();
@@ -185,7 +195,8 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				purpose,
 				nonce,
 				codeVerifier,
-				returnPathname: sanitizeReturnPath(returnPathname),
+				returnPathname: sanitizeReturnPath(options.returnPathname),
+				maxAge: options.maxAge,
 			},
 			password(),
 		);
@@ -194,6 +205,9 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			provider().authorizationUrl(
 				{
 					redirectUri: callbackUri(purpose, request),
+					loginHint: options.loginHint,
+					maxAge: options.maxAge,
+					prompt: options.prompt,
 					state,
 					nonce,
 					codeVerifier,
@@ -229,35 +243,41 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		const clearVerifier = state
 			? [expire(verifierCookieName(prefix(), state))]
 			: [];
+		if (!state || !(url.searchParams.get("code") || url.searchParams.get("error"))) {
+			return { ok: false, reason: "invalid_callback", error: new OidcStateError("missing"), setCookies: clearVerifier } as const;
+		}
+		let reason: CallbackErrorReason = "invalid_state";
 		try {
-			if (!state || !(url.searchParams.get("code") || url.searchParams.get("error"))) {
-				throw new OidcStateError("missing");
-			}
 			const flow = await verifyCallbackState({
 				state,
 				cookieValue: cookies.get(verifierCookieName(prefix(), state)),
 				password: password(),
 				purpose,
 			});
+			reason = "token_exchange_failed";
 			// Rebuild the callback on the registered redirect URI so a proxy
 			// in front of the app doesn't change the URL being verified.
 			const callbackUrl = new URL(callbackUri(purpose, request));
 			callbackUrl.search = url.search;
-			const { user, tokens, idpSid } = await withinDeadline(
+			const { user, tokens, idpSid, authTime } = await withinDeadline(
 				provider().exchangeCode(
 					callbackUrl,
 					{
 						state,
 						nonce: flow.nonce,
 						codeVerifier: flow.codeVerifier,
+						maxAge: flow.maxAge,
 					},
 					context,
 				),
 				context,
 			);
-			return { ok: true as const, flow, user, tokens, idpSid, clearVerifier };
+			return { ok: true as const, flow, user, tokens, idpSid, authTime, clearVerifier };
 		} catch (error) {
-			return { ok: false as const, error, setCookies: clearVerifier };
+			const code = authorizationErrorCode(error);
+			if (code) reason = code === "access_denied" ? "access_denied" : "provider_error";
+			else if (error instanceof OidcStateError && error.reason === "missing") reason = "sign_in_expired";
+			return { ok: false as const, reason, error, setCookies: clearVerifier };
 		}
 	}
 
@@ -290,10 +310,13 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		signIn(
 			request: Request,
 			cookies: Map<string, string>,
-			returnPathname?: string | null,
+			options?: string | null | SignInOptions,
 			context?: OidcCallContext,
 		) {
-			return begin("session", request, cookies, returnPathname, context);
+			const signInOptions = typeof options === "string"
+				? { returnPathname: options }
+				: signInOptionsSchema.parse(options ?? {});
+			return begin("session", request, cookies, signInOptions, context);
 		},
 
 		/** Verifies the flow, exchanges the code, and issues the session. */
@@ -304,7 +327,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		): Promise<CallbackResult> {
 			const result = await complete("session", request, cookies, context);
 			if (!result.ok) return result;
-			const { user, tokens, idpSid, flow, clearVerifier } = result;
+			const { user, tokens, idpSid, authTime, flow, clearVerifier } = result;
 			try {
 				if (!options.allowSession(user)) throw new SessionAccessDeniedError();
 				const now = Math.floor(Date.now() / 1000);
@@ -317,6 +340,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 							...tokens,
 							sid: crypto.randomUUID(),
 							...(idpSid ? { idpSid } : {}),
+							authTime,
 							issuedAt: now,
 							lastSeenAt: now,
 						})),
@@ -324,7 +348,8 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 					],
 				};
 			} catch (error) {
-				return { ok: false, error, setCookies: clearVerifier };
+				const reason = error instanceof SessionAccessDeniedError ? "session_access_denied" : "session_failed";
+				return { ok: false, reason, error, setCookies: clearVerifier };
 			}
 		},
 
@@ -339,7 +364,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			returnPathname: string,
 			context?: OidcCallContext,
 		) {
-			return begin("grant", request, cookies, returnPathname, context);
+			return begin("grant", request, cookies, { returnPathname }, context);
 		},
 
 		/** Verifies a grant's callback and exchanges its code for tokens. */

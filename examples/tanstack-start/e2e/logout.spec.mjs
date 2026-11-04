@@ -12,6 +12,9 @@ test("the signOut RPC navigates the document through provider logout", async ({ 
 	await page.getByRole("button", { name: "Sign-in", exact: true }).click();
 	await page.getByRole("button", { name: "Continue", exact: true }).click();
 	await expect(identity).toBeVisible();
+	// The root loader supplies the account on the first render, before hydration.
+	const ssr = await page.request.get("/");
+	expect(await ssr.text()).toContain("Round Trip Tester");
 	await page.reload({ waitUntil: "networkidle" });
 	await expect(identity).toBeVisible();
 	const sessionCookies = async () => (await context.cookies(baseURL)).filter((c) => c.name.includes("example_session"));

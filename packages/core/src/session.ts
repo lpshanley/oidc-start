@@ -34,6 +34,8 @@ const sessionSchema = z.object({
 	sid: z.string().min(1),
 	/** Seconds since epoch of sign-in; bounds the absolute lifetime. */
 	issuedAt: z.number(),
+	/** Provider authentication time from the sign-in ID token, in epoch seconds. */
+	authTime: z.number().nonnegative().optional(),
 	/** Seconds since epoch of the last request; bounds the idle lifetime. */
 	lastSeenAt: z.number(),
 	/** The provider's session id (ID token `sid`), when it sends one. */

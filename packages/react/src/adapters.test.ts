@@ -162,13 +162,13 @@ describe("route handlers", () => {
 
 		const response = await routes.signInRoute(
 			new Request("https://sage.test/api/auth/sign-in?returnPathname=%2Fp"),
-			{},
+			{ prompt: "select_account" },
 		);
 
 		expect(core.signIn).toHaveBeenCalledWith(
 			expect.any(Request),
 			expect.any(Map),
-			"/p",
+			{ returnPathname: "/p", prompt: "select_account" },
 			{ correlationId: "req-1" },
 		);
 		expect(response.status).toBe(307);
@@ -223,6 +223,19 @@ describe("route handlers", () => {
 		expect(appended).toEqual(["s=1", "v=; Max-Age=0"]);
 	});
 
+	test("customizes callback failures after verifier cleanup and preserves host policy denial", async () => {
+		const appended = context();
+		const request = new Request("https://sage.test/callback");
+		const onError = vi.fn(async () => new Response("Retry later", { status: 503 }));
+		for (const reason of ["token_exchange_failed", "session_access_denied"]) {
+			core.callback.mockResolvedValueOnce({ ok: false, reason, error: new Error(), setCookies: ["v=; Max-Age=0"] });
+			const response = await routes.callbackRoute(request, { onError, errorRedirectUrl: "/fallback" });
+			expect(response.status).toBe(reason === "session_access_denied" ? 403 : 503);
+		}
+		expect(onError).toHaveBeenCalledExactlyOnceWith({ reason: "token_exchange_failed", request });
+		expect(appended).toEqual(["v=; Max-Age=0", "v=; Max-Age=0"]);
+	});
+
 	test("sign-out accepts only POST and redirects to the provider logout", async () => {
 		const appended = context({
 			session: { user: alice } as OidcContext["session"],
@@ -268,6 +281,22 @@ test("both sign-out entry points return 503 and preserve cookies when revocation
 		expect(await (response as Response).text()).toBe("Sign-out could not be recorded. Try again.");
 	}
 	expect(appended).toEqual([]);
+});
+
+test("recent auth uses the provider login time, including the boundary, and fails closed", async () => {
+	const { checkRecentAuth } = await import("./server.js");
+	vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+	try {
+		context();
+		expect(checkRecentAuth({ maxAge: 300 }).isStale).toBe(true);
+		for (const [authTime, expected] of [[undefined, true], [699, true], [700, false], [1000, false], [1001, true]] as const) {
+			context({ session: { issuedAt: 1000, authTime } as OidcContext["session"] });
+			expect(checkRecentAuth({ maxAge: 300 }).isStale).toBe(expected);
+		}
+		expect(() => checkRecentAuth({ maxAge: NaN })).toThrow(RangeError);
+	} finally {
+		vi.restoreAllMocks();
+	}
 });
 
 describe("server function bodies", () => {

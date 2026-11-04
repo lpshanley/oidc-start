@@ -3,7 +3,7 @@ import { createRemoteJWKSet, jwtVerify, customFetch as jwksFetch } from "jose";
 import * as client from "openid-client";
 import type { OidcCallContext, OidcConfiguration } from "./config.js";
 import { LOGOUT_TOKEN_MAX_AGE_SECONDS, LogoutTokenError, logoutTarget } from "./logout-token.js";
-import type { AuthUser } from "./models.js";
+import type { AuthUser, SignInOptions } from "./models.js";
 
 // OpenID Connect operations over openid-client, standing in for the WorkOS
 // user-management calls in authkit-session (authorization URL, code exchange,
@@ -82,11 +82,15 @@ export const PROVIDER_TIMEOUT_MS = 5_000;
 /** The provider has not received a token refresh request. */
 export class RefreshNotDispatched extends Error {}
 
-/** Whether the provider returned access_denied in its authorization response. */
-export function isAuthorizationDenied(error: unknown): boolean {
+/** OAuth error code from an authorization response, including across bundles. */
+export function authorizationErrorCode(error: unknown): string | undefined {
 	return typeof error === "object" && error !== null
 		&& "code" in error && error.code === "OAUTH_AUTHORIZATION_RESPONSE_ERROR"
-		&& "error" in error && error.error === "access_denied";
+		&& "error" in error && typeof error.error === "string" ? error.error : undefined;
+}
+
+export function isAuthorizationDenied(error: unknown): boolean {
+	return authorizationErrorCode(error) === "access_denied";
 }
 
 export function createProvider(
@@ -175,6 +179,9 @@ export function createProvider(
 
 	const api = {
 		async authorizationUrl({
+			maxAge,
+			loginHint,
+			prompt,
 			redirectUri,
 			state,
 			nonce,
@@ -184,10 +191,13 @@ export function createProvider(
 			state: string;
 			nonce: string;
 			codeVerifier: string;
-		}) {
+		} & Pick<SignInOptions, "loginHint" | "prompt" | "maxAge">) {
 			return client.buildAuthorizationUrl(await discover(), {
 				redirect_uri: redirectUri,
 				scope: settings.OIDC_SCOPES,
+				...(loginHint && { login_hint: loginHint }),
+				...(prompt && { prompt }),
+				...(maxAge !== undefined && { max_age: String(maxAge) }),
 				state,
 				nonce,
 				code_challenge: await client.calculatePKCECodeChallenge(codeVerifier),
@@ -197,8 +207,8 @@ export function createProvider(
 
 		async exchangeCode(
 			callbackUrl: URL,
-			checks: { state: string; nonce: string; codeVerifier: string },
-		): Promise<{ user: AuthUser; tokens: TokenSet; idpSid?: string }> {
+			checks: { state: string; nonce: string; codeVerifier: string; maxAge?: number },
+		): Promise<{ user: AuthUser; tokens: TokenSet; idpSid?: string; authTime?: number }> {
 			const config = await discover();
 			const response = await client.authorizationCodeGrant(
 				config,
@@ -207,11 +217,17 @@ export function createProvider(
 					pkceCodeVerifier: checks.codeVerifier,
 					expectedState: checks.state,
 					expectedNonce: checks.nonce,
+					maxAge: checks.maxAge,
 					idTokenExpected: true,
 				},
 			);
 			const claims = response.claims();
 			if (!claims?.sub) throw new Error("ID token has no subject");
+			// openid-client validates the requested age. A future authentication time
+			// must never become evidence of a recent login as the local clock advances.
+			const authTime = claims.auth_time;
+			const inFuture = authTime !== undefined && authTime > Math.floor(Date.now() / 1000);
+			if (inFuture && checks.maxAge !== undefined) throw new Error("ID token authentication time is in the future");
 			let email = firstString(claims.email);
 			const tokenRoles = roleList(claims[settings.OIDC_ROLES_CLAIM]);
 			let info: client.UserInfoResponse | undefined;
@@ -241,6 +257,7 @@ export function createProvider(
 						tokenRoles ?? roleList(info?.[settings.OIDC_ROLES_CLAIM]) ?? [],
 				},
 				tokens: tokenSet(response),
+				authTime: inFuture ? undefined : authTime,
 				// The provider's session id, matched by back-channel logout tokens.
 				idpSid: firstString(claims.sid) ?? undefined,
 			};

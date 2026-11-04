@@ -96,9 +96,13 @@ function Home() {
 }
 ```
 
+For shared UI such as an account menu, load `getAuth()` in the root route and wrap `<Outlet />` in `<OidcAuthProvider auth={Route.useLoaderData()}>`. Import the provider and `useAuth` from `@lpshanley/oidc-start-react/client`. Components can then call `const { user, signIn, signOut } = useAuth()` and bind buttons with `onClick={() => signIn()}` or `onClick={() => signOut()}`. The first render uses the loader's user, and subsequent loader updates flow through the provider. [Example root route](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/__root.tsx)
+
 **Try it.** Open `/` in a fresh browser session and choose **Sign in**. After the provider redirects you back, your name should appear and survive a reload. Choose **Sign out**, finish logout at the provider if prompted, and reload. You should see **Sign in** again.
 
 To return someone to a specific page, pass a local path when starting sign-in, for example `getSignInUrl({ data: { returnPathname: '/account' } })`.
+
+To prefill an account, pass `loginHint`. For an account picker, call `signIn({ prompt: 'select_account' })`. The hook, `getSignInUrl({ data: options })`, and `handleSignInRoute(options)` accept the same sign-in options. Supported prompts are `login`, `consent`, `select_account`, and `none`. Omitting `prompt` leaves the provider's usual SSO behavior in place.
 
 ## HTTP routes and server access
 
@@ -112,3 +116,13 @@ The buttons above use server functions. If you prefer ordinary links and forms, 
 | POST | `handleBackchannelLogoutRoute()` | Register this URL with your provider for back-channel logout. The provider sends a signed logout token without a browser Origin header. Keep the browser CSRF check scoped to the browser routes. |
 
 In a server handler, import `getOidcContext` from `@lpshanley/oidc-start-react/server` to access the resolved session and core for the current request. Use `getAuth()` from `/functions` when a loader or component only needs the user.
+
+### Customize callback failures
+
+Pass `onError({ reason, request })` to `handleCallbackRoute` to return a custom response. It takes precedence over `errorRedirectUrl`. A provider cancellation is `access_denied`, and a missing verifier (for example after its cookie expires) is `sign_in_expired`. Other reasons are `invalid_callback`, `invalid_state`, `provider_error`, `token_exchange_failed`, and `session_failed`. The middleware still clears the failed flow's verifier. A rejection by your own `allowSession` policy takes its separate 403 path.
+
+### Require a recent login
+
+Inside the server handler for a sensitive action, call `checkRecentAuth({ maxAge: 300 })` from `@lpshanley/oidc-start-react/server` before performing the action. If `isStale` is true, stop the mutation and offer `signIn({ maxAge: 300, returnPathname: '/settings' })`. Check again when the user submits the action after returning. Pick the maximum age in the server's policy.
+
+The age is in seconds and comes from the provider's ID-token `auth_time`. Signed-out users, existing sessions without that claim, and expired authentication all require sign-in. Token refresh preserves the original authentication time. A sign-in with `maxAge: 0` requests fresh authentication.

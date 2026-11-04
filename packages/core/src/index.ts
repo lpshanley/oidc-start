@@ -2,6 +2,7 @@ export {
 	createOidcCore,
 	SessionAccessDeniedError,
 	type OidcCore,
+	type CallbackErrorReason,
 	type OidcAuth,
 	type GrantRefresh,
 	type GrantResult,

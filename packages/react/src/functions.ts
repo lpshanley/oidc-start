@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { z } from "zod";
+import { signInOptionsSchema } from "@lpshanley/oidc-start-core/models";
 
 // Server functions after WorkOS's server-functions.ts; bodies load lazily so
 // server code stays out of the client bundle.
@@ -12,10 +12,10 @@ export const getAuth = createServerFn({ method: "GET" }).handler(async () => {
 
 /** An authorization URL; also queues the flow's verifier cookie. */
 export const getSignInUrl = createServerFn({ method: "GET" })
-	.validator(z.object({ returnPathname: z.string().optional() }).optional())
+	.validator(signInOptionsSchema.optional())
 	.handler(async ({ data }) => {
 		const { getSignInUrlBody } = await import("./functions.server.js");
-		return getSignInUrlBody(data?.returnPathname);
+		return getSignInUrlBody(data);
 	});
 
 /** Clears the session and redirects to provider logout. In a component, call via useServerFn. */

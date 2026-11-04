@@ -1,15 +1,15 @@
 // Server route handler factories, after WorkOS's handleCallbackRoute. They run
 // behind oidcMiddleware, which applies the cookies they queue.
 
-import type { CallbackRouteOptions } from "./routes.server.js";
+import type { CallbackRouteOptions, SignInRouteOptions } from "./routes.server.js";
 
-export type { CallbackRouteOptions };
+export type { CallbackRouteOptions, SignInRouteOptions };
 
 type RouteHandler = (args: { request: Request }) => Promise<Response>;
 
 /** GET: redirects to the provider; `?returnPathname=` sets the destination. */
 export function handleSignInRoute(
-	options: CallbackRouteOptions = {},
+	options: SignInRouteOptions = {},
 ): RouteHandler {
 	return async ({ request }) => {
 		const { signInRoute } = await import("./routes.server.js");
