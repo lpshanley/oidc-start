@@ -1,6 +1,6 @@
 # @lpshanley/oidc-start-core
 
-OpenID Connect for a Node.js server. Handles discovery, code exchange with PKCE, sealed browser sessions, refresh, revocation and back-channel logout.
+OpenID Connect for a Node.js server. Handles discovery, code exchange with PKCE, sealed browser sessions, refresh, revocation and back-channel logout. Use the separate `@lpshanley/oidc-start-react` package for TanStack Start.
 
 ```ts
 import { createOidcCore } from '@lpshanley/oidc-start-core'
