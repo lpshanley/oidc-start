@@ -16,6 +16,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
     "./functions": {
       "types": "./dist/functions.d.ts",
       "import": "./dist/functions.js"
@@ -59,6 +63,10 @@
   },
   "peerDependencies": {
     "@tanstack/react-router": "^1.170.44",
-    "@tanstack/react-start": "^1.169.2"
+    "@tanstack/react-start": "^1.169.2",
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
   }
 }

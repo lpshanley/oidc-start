@@ -96,6 +96,8 @@ function Home() {
 }
 ```
 
+For shared UI such as an account menu, load `getAuth()` in the root route and wrap `<Outlet />` in `<OidcAuthProvider auth={Route.useLoaderData()}>`. Import the provider and `useAuth` from `@lpshanley/oidc-start-react/client`. Components can then call `const { user, signIn, signOut } = useAuth()` and bind buttons with `onClick={() => signIn()}` or `onClick={() => signOut()}`. The first render uses the loader's user, and subsequent loader updates flow through the provider. [Example root route](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/__root.tsx)
+
 **Try it.** Open `/` in a fresh browser session and choose **Sign in**. After the provider redirects you back, your name should appear and survive a reload. Choose **Sign out**, finish logout at the provider if prompted, and reload. You should see **Sign in** again.
 
 To return someone to a specific page, pass a local path when starting sign-in, for example `getSignInUrl({ data: { returnPathname: '/account' } })`.
