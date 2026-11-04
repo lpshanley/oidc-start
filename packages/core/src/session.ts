@@ -123,11 +123,11 @@ export function createSessionManager({
 		return clearChunked(cookies, name(), cookieOptions());
 	}
 
-	async function resolve(
+	// Verify the cookie, host policy, lifetimes, and revocation before using it.
+	// A store read failure propagates so sign-out can be retried.
+	async function readActive(
 		cookies: Map<string, string>,
-		onRefreshError: (error: unknown) => void = () => {},
-		bound: <T>(work: Promise<T>) => Promise<T> = (work) => work,
-		context?: OidcCallContext,
+		onStoreError?: (error: unknown) => void,
 	): Promise<SessionResolution> {
 		const sealed = readChunked(cookies, name());
 		if (sealed === undefined) return { session: null, setCookies: [] };
@@ -152,10 +152,23 @@ export function createSessionManager({
 				return { session: null, setCookies: clear(cookies) };
 			}
 		} catch (error) {
-			// Fail closed, but keep the cookie: the session may be valid once the store is back.
-			onRefreshError(error);
+			if (!onStoreError) throw error;
+			onStoreError(error);
 			return { session: null, setCookies: [] };
 		}
+		return { session, setCookies: [] };
+	}
+
+	async function resolve(
+		cookies: Map<string, string>,
+		onRefreshError: (error: unknown) => void = () => {},
+		bound: <T>(work: Promise<T>) => Promise<T> = (work) => work,
+		context?: OidcCallContext,
+	): Promise<SessionResolution> {
+		const checked = await readActive(cookies, onRefreshError);
+		const { session } = checked;
+		if (!session) return checked;
+		const now = Math.floor(Date.now() / 1000);
 		if (session.expiresAt - now > REFRESH_LEEWAY_SECONDS) {
 			if (now - session.lastSeenAt < TOUCH_AFTER_SECONDS) {
 				return { session, setCookies: [] };
@@ -190,7 +203,7 @@ export function createSessionManager({
 		}
 	}
 
-	return { resolve, write, clear };
+	return { readActive, resolve, write, clear };
 }
 
 export type SessionManager = ReturnType<typeof createSessionManager>;

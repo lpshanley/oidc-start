@@ -395,6 +395,16 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			context?: OidcCallContext,
 			everywhere = false,
 		) {
+			// A failed revocation lookup is anonymous for ordinary requests. Before
+			// signing out, require a definitive result for any presented cookie.
+			if (!session) {
+				const checked = await sessions.readActive(cookies);
+				if (checked.session && everywhere) {
+					// Only a fully resolved session may revoke the user's other sessions.
+					throw new Error("Retry signing out everywhere with an active session");
+				}
+				session = checked.session;
+			}
 			if (session) {
 				const now = Math.floor(Date.now() / 1000);
 				if (everywhere)

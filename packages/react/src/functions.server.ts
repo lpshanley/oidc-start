@@ -1,5 +1,6 @@
 import { redirect } from "@tanstack/react-router";
 import { setResponseHeader } from "@tanstack/react-start/server";
+import { endSession } from "./sign-out.server.js";
 import { getOidcContext } from "./context.js";
 import type { AuthSession } from "@lpshanley/oidc-start-core/models";
 
@@ -21,13 +22,7 @@ export async function getSignInUrlBody(returnPathname?: string) {
 }
 
 export async function signOutBody(): Promise<never> {
-	const context = getOidcContext();
-	const { location, setCookies } = await context.core.signOut(
-		context.request,
-		context.cookies,
-		context.session,
-		context.call,
-	);
-	for (const line of setCookies) context.appendSetCookie(line);
-	throw redirect({ href: location, reloadDocument: true });
+	const result = await endSession();
+	if (result instanceof Response) throw result;
+	throw redirect({ href: result, reloadDocument: true });
 }

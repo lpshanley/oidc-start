@@ -258,6 +258,21 @@ describe("route handlers", () => {
 	});
 });
 
+test("both sign-out entry points return 503 and preserve cookies when revocation fails", async () => {
+	const appended = context();
+	const failure = new Error("private database details");
+	core.signOut.mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
+	const req = new Request("https://sage.test/logout", { method: "POST" });
+	const route = await routes.signOutRoute(req);
+	const rpc = await functions.signOutBody().catch((error: unknown) => error);
+	for (const response of [route, rpc]) {
+		expect(response).toBeInstanceOf(Response);
+		expect((response as Response).status).toBe(503);
+		expect(await (response as Response).text()).toBe("Sign-out could not be recorded. Try again.");
+	}
+	expect(appended).toEqual([]);
+});
+
 describe("server function bodies", () => {
 	test("getAuth returns only the user and is not cached", () => {
 		context({ auth: () => ({ user: alice }) });

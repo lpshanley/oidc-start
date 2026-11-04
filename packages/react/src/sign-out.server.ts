@@ -1,0 +1,19 @@
+import { getOidcContext } from "./context.js";
+
+export async function endSession(everywhere = false): Promise<string | Response> {
+	const context = getOidcContext();
+	let result;
+	try {
+		result = await context.core.signOut(
+			context.request, context.cookies, context.session, context.call, everywhere,
+		);
+	} catch (error) {
+		context.core.report({ operation: "end-session", error, context: context.call });
+		return new Response("Sign-out could not be recorded. Try again.", {
+			status: 503,
+			headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
+		});
+	}
+	for (const line of result.setCookies) context.appendSetCookie(line);
+	return result.location;
+}

@@ -502,6 +502,52 @@ test.each([
 	).rejects.toBe(failure);
 });
 
+test.each([false, true])("sign-out can be retried after a revocation read outage (everywhere=%s)", async (everywhere) => {
+	let offline = true;
+	const revoked = new Set<string>();
+	const failure = new Error("store offline");
+	const auth = createOidcCore({
+		allowSession,
+		environment: () => env,
+		onError: vi.fn(),
+		revocations: {
+			...revocations,
+			async isRevoked({ sid, sub }) {
+				if (offline) throw failure;
+				return revoked.has(sid) || revoked.has(sub);
+			},
+			async revoke(sid) { revoked.add(sid); },
+			async revokeAllFor(sub) { revoked.add(sub); },
+		},
+	});
+	const jar = new Map<string, string>();
+	const start = await auth.signIn(request("/"), jar);
+	apply(jar, start.setCookies);
+	const state = new URL(start.url).searchParams.get("state");
+	const callback = await auth.callback(request(`/callback?code=c&state=${state}`, jar), jar);
+	apply(jar, callback.setCookies);
+	const logout = request("/logout", jar);
+	const blocked = await auth.resolve(logout);
+	expect(blocked).toMatchObject({ session: null, setCookies: [] });
+	await expect(auth.signOut(logout, blocked.cookies, blocked.session, undefined, everywhere))
+		.rejects.toBe(failure);
+	expect(revoked.size).toBe(0);
+
+	offline = false;
+	const retry = await auth.resolve(logout);
+	expect(retry.session?.user.sub).toBe("alice");
+	// Recovery between resolution and sign-out may end this cookie, but cannot
+	// authorize ending other sessions until a fresh request resolves the user.
+	if (everywhere) {
+		await expect(auth.signOut(logout, blocked.cookies, null, undefined, true)).rejects.toThrow("active session");
+		expect(revoked.size).toBe(0);
+	}
+	const out = await auth.signOut(logout, retry.cookies, everywhere ? retry.session : null, undefined, everywhere);
+	expect(out.setCookies.join()).toContain("Max-Age=0");
+	expect(revoked).toEqual(new Set([everywhere ? "alice" : retry.session?.sid]));
+	expect((await auth.resolve(logout)).session).toBeNull(); // replay the original cookie
+});
+
 describe("grants", () => {
 	async function started(path = "/oauth/upstream/start") {
 		const auth = core();

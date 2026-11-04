@@ -1,3 +1,4 @@
+import { endSession } from "./sign-out.server.js";
 import { getOidcContext } from "./context.js";
 import { SessionAccessDeniedError } from "@lpshanley/oidc-start-core";
 
@@ -86,32 +87,9 @@ export async function signOutRoute(request: Request) {
 			headers: { Allow: "POST" },
 		});
 	}
-	const context = getOidcContext();
 	const form = await request.formData().catch(() => undefined);
-	let result: { location: string; setCookies: string[] };
-	try {
-		result = await context.core.signOut(
-			request,
-			context.cookies,
-			context.session,
-			context.call,
-			form?.get("everywhere") === "1",
-		);
-	} catch (error) {
-		// The revocation was not recorded, so the cookie would still work: say so.
-		context.core.report({
-			operation: "end-session",
-			error,
-			context: context.call,
-		});
-		return new Response("Sign-out could not be recorded. Try again.", {
-			status: 503,
-			headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
-		});
-	}
-	const { location, setCookies } = result;
-	for (const line of setCookies) context.appendSetCookie(line);
-	return redirectTo(location, 303);
+	const result = await endSession(form?.get("everywhere") === "1");
+	return result instanceof Response ? result : redirectTo(result, 303);
 }
 
 export async function backchannelLogoutRoute(request: Request) {
