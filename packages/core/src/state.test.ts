@@ -10,17 +10,15 @@ import {
 } from "./state.js";
 
 const password = "test-only-session-secret-at-least-32-characters";
-const flow = { nonce: "n", codeVerifier: "v", returnPathname: "/projects" };
+const flow = { state: "transaction", purpose: "session", nonce: "n", codeVerifier: "v", returnPathname: "/projects" } as const;
 
 afterEach(() => vi.useRealTimers());
 
 describe("flow state", () => {
-	test("names verifier cookies by a stable hash of the sealed state", async () => {
-		const sealed = await sealState(flow, password);
-
+	test("names verifier cookies by a stable hash of the public state", () => {
 		expect(fnv1a32Hex("")).toBe("811c9dc5");
-		expect(verifierCookieName("sage", sealed)).toBe(
-			`sage-verifier-${fnv1a32Hex(sealed)}`,
+		expect(verifierCookieName("sage", flow.state)).toBe(
+			`sage-verifier-${fnv1a32Hex(flow.state)}`,
 		);
 	});
 
@@ -28,19 +26,27 @@ describe("flow state", () => {
 		const sealed = await sealState(flow, password);
 
 		await expect(
-			verifyCallbackState({ state: sealed, cookieValue: sealed, password }),
+			verifyCallbackState({ state: flow.state, cookieValue: sealed, password }),
 		).resolves.toMatchObject(flow);
 	});
 
 	test.each([
 		["missing", undefined],
-		["mismatch", "something-else"],
+		["invalid", "something-else"],
 	] as const)("rejects a %s cookie", async (reason, cookieValue) => {
-		const sealed = await sealState(flow, password);
-
 		await expect(
-			verifyCallbackState({ state: sealed, cookieValue, password }),
+			verifyCallbackState({ state: flow.state, cookieValue, password }),
 		).rejects.toEqual(new OidcStateError(reason));
+	});
+
+	test("rejects a valid verifier from another transaction and the old mirrored format", async () => {
+		const verifier = await sealState(flow, password);
+		await expect(verifyCallbackState({ state: "other", cookieValue: verifier, password }))
+			.rejects.toEqual(new OidcStateError("mismatch"));
+		const { state: _, ...legacy } = flow;
+		const old = await sealValue({ ...legacy, issuedAt: Date.now() }, password, 600);
+		await expect(verifyCallbackState({ state: old, cookieValue: old, password }))
+			.rejects.toEqual(new OidcStateError("invalid"));
 	});
 
 	test("rejects a forged seal, a foreign shape, and an expired flow", async () => {
@@ -53,9 +59,9 @@ describe("flow state", () => {
 		const old = await sealState(flow, password);
 		vi.setSystemTime(601_000);
 
-		for (const state of [forged, shape, old]) {
+		for (const cookieValue of [forged, shape, old]) {
 			await expect(
-				verifyCallbackState({ state, cookieValue: state, password }),
+				verifyCallbackState({ state: flow.state, cookieValue, password }),
 			).rejects.toEqual(new OidcStateError("invalid"));
 		}
 	});

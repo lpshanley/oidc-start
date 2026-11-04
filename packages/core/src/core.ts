@@ -1,5 +1,5 @@
 import { errors } from "jose";
-import { randomNonce, randomPKCECodeVerifier } from "openid-client";
+import { randomNonce, randomPKCECodeVerifier, randomState } from "openid-client";
 import {
 	assertOidcConfigured,
 	authOriginConfigurationSchema,
@@ -190,8 +190,10 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 	) {
 		const nonce = randomNonce();
 		const codeVerifier = randomPKCECodeVerifier();
-		const state = await sealState(
+		const state = randomState();
+		const verifier = await sealState(
 			{
+				state,
 				purpose,
 				nonce,
 				codeVerifier,
@@ -223,7 +225,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		return {
 			url: url.toString(),
 			setCookies: [
-				serializeCookie(name, state, {
+					serializeCookie(name, verifier, {
 					...cookieOptions(),
 					maxAge: STATE_MAX_AGE_SECONDS,
 				}),
