@@ -118,6 +118,28 @@ For navigation links, import `SignedIn` and `SignedOut` from that same entry. In
 
 **Try it.** Open `/` in a fresh browser session and choose **Sign in**. After the provider redirects you back, your name should appear and survive a reload. Choose **Sign out**, finish logout at the provider if prompted, and reload. You should see **Sign in** again.
 
+### Recheck the session when a tab regains focus
+
+To pick up a sign-out from another tab, add this effect to the root component that reads the auth loader. Invalidating the root match reruns `getAuth()` and supplies the new user to the provider. The server function returns only `{ user }` and sets `Cache-Control: no-store`.
+
+```tsx
+import { rootRouteId, useRouter } from '@tanstack/react-router'
+import { useEffect } from 'react'
+
+function useRecheckAuthOnFocus() {
+  const router = useRouter()
+  useEffect(() => {
+    const recheck = () => {
+      void router.invalidate({ filter: match => match.routeId === rootRouteId })
+    }
+    window.addEventListener('focus', recheck)
+    return () => window.removeEventListener('focus', recheck)
+  }, [router])
+}
+```
+
+Call `useRecheckAuthOnFocus()` once in the root component to opt in. A session check can update the idle timestamp, so a periodic timer in an unattended tab can extend its session.
+
 ### Sign in and return here
 
 From a page with a sign-in button, pass its local pathname when the user clicks. The server sanitizes the path and binds it to this sign-in flow. Omitting the option keeps the default destination of `/`.
