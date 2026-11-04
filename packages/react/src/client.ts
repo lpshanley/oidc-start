@@ -1,4 +1,4 @@
-import { createContext, createElement, useContext, type ReactNode } from "react";
+import { createContext, createElement, Fragment, useContext, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { hasRole, type AuthSession, type SignInOptions } from "@lpshanley/oidc-start-core/models";
 import { getSignInUrl, signOut } from "./functions.js";
@@ -15,6 +15,16 @@ export function useUser() {
 	const auth = useContext(AuthContext);
 	if (!auth) throw new Error("Auth hooks require an OidcAuthProvider.");
 	return auth.user;
+}
+
+/** Render children when the loader has a signed-in user. */
+export function SignedIn({ children }: { children: ReactNode }) {
+	return useUser() ? createElement(Fragment, null, children) : null;
+}
+
+/** Render children when the loader has no signed-in user. */
+export function SignedOut({ children }: { children: ReactNode }) {
+	return useUser() ? null : createElement(Fragment, null, children);
 }
 
 export function useAuth() {
