@@ -1,5 +1,21 @@
 # @lpshanley/oidc-start-react
 
+## 0.3.0
+
+### Minor Changes
+
+- 44d6a77: Add an optional React provider and useAuth hook for loader-backed user data and sign-in and sign-out buttons.
+- c741731: Expose classified callback failures and a route-level onError handler for custom responses.
+- fcf2dc1: Request recent authentication with maxAge and enforce it in server handlers using checkRecentAuth.
+- 37a6e78: Support loginHint and prompt on individual sign-ins, including account selection, while keeping the provider's default SSO behavior.
+
+### Patch Changes
+
+- Updated dependencies [c741731]
+- Updated dependencies [fcf2dc1]
+- Updated dependencies [37a6e78]
+  - @lpshanley/oidc-start-core@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes

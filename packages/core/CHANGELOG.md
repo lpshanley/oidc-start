@@ -1,5 +1,13 @@
 # @lpshanley/oidc-start-core
 
+## 0.3.0
+
+### Minor Changes
+
+- c741731: Expose classified callback failures and a route-level onError handler for custom responses.
+- fcf2dc1: Request recent authentication with maxAge and enforce it in server handlers using checkRecentAuth.
+- 37a6e78: Support loginHint and prompt on individual sign-ins, including account selection, while keeping the provider's default SSO behavior.
+
 ## 0.2.0
 
 Core and the React adapter are versioned together. This release pairs core with the adapter's new public exports.
