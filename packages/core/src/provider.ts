@@ -254,6 +254,31 @@ export function createProvider(
 			return { ...tokenSet(response, refreshToken), roles };
 		},
 
+		/** Revokes a refresh token at the provider, so it cannot mint new tokens. */
+		async revokeRefreshToken(refreshToken: string) {
+			await client.tokenRevocation(await discover(), refreshToken, {
+				token_type_hint: "refresh_token",
+			});
+		},
+
+		/** The provider logout URL, or null when it has no end_session_endpoint. */
+		async endSessionUrl({
+			idTokenHint,
+			postLogoutRedirectUri,
+		}: {
+			idTokenHint?: string;
+			postLogoutRedirectUri: string;
+		}) {
+			const config = await discover();
+			if (!config.serverMetadata().end_session_endpoint) return null;
+			return client
+				.buildEndSessionUrl(config, {
+					client_id: settings.OIDC_CLIENT_ID,
+					post_logout_redirect_uri: postLogoutRedirectUri,
+					...(idTokenHint ? { id_token_hint: idTokenHint } : {}),
+				})
+				.toString();
+		},
 	};
 	return {
 		authorizationUrl: (
@@ -267,6 +292,12 @@ export function createProvider(
 		) => transport.run(context, () => api.exchangeCode(url, checks)),
 		refresh: (token: string, subject: string, context?: OidcCallContext) =>
 			transport.run(context, () => api.refresh(token, subject)),
+		revokeRefreshToken: (token: string, context?: OidcCallContext) =>
+			transport.run(context, () => api.revokeRefreshToken(token)),
+		endSessionUrl: (
+			input: Parameters<typeof api.endSessionUrl>[0],
+			context?: OidcCallContext,
+		) => transport.run(context, () => api.endSessionUrl(input)),
 	};
 }
 

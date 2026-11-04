@@ -19,7 +19,7 @@ import {
 	createProvider,
 	type OidcProvider,
 } from "./provider.js";
-import { createSessionManager } from "./session.js";
+import { createSessionManager, type Session } from "./session.js";
 import {
 	OidcStateError,
 	STATE_MAX_AGE_SECONDS,
@@ -297,6 +297,62 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			} catch (error) {
 				return { ok: false, error, setCookies: clearVerifier };
 			}
+		},
+
+		/**
+		 * Ends the session server-side (every session of the user with
+		 * `everywhere`), clears the cookie, and returns the provider logout URL.
+		 * Throws when the revocation cannot be recorded, so a sign-out is never
+		 * reported done while the cookie would still work.
+		 */
+		async signOut(
+			request: Request,
+			cookies: Map<string, string>,
+			session: Session | null,
+			context?: OidcCallContext,
+			everywhere = false,
+		) {
+			if (session) {
+				const now = Math.floor(Date.now() / 1000);
+				if (everywhere)
+					await options.revocations.revokeAllFor(session.user.sub, now);
+				else {
+					await options.revocations.revoke(
+						session.sid,
+						session.issuedAt + settings.sessionMaxAgeSeconds,
+					);
+				}
+			}
+			if (session?.refreshToken) {
+				try {
+					await withinDeadline(
+						provider().revokeRefreshToken(session.refreshToken, context),
+						context,
+					);
+				} catch (error) {
+					// The session is already revoked here, and its cookie sealed; report and go on.
+					onError({ operation: "token-revocation", error, context });
+				}
+			}
+			const afterLogout = `${origin(request)}${sanitizeReturnPath(settings.postLogoutPath)}`;
+			let location = afterLogout;
+			try {
+				location =
+					(await withinDeadline(
+						provider().endSessionUrl(
+							{
+								idTokenHint: session?.idToken,
+								postLogoutRedirectUri: afterLogout,
+							},
+							context,
+						),
+						context,
+					)) ?? afterLogout;
+			} catch (error) {
+				// Signing out locally still succeeds when the provider is unreachable.
+				onError({ operation: "end-session", error, context });
+			}
+			return { location, setCookies: sessions.clear(cookies) };
 		},
 
 		/** Reports a failure through the configured `onError`. */

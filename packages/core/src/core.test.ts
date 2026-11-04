@@ -96,7 +96,7 @@ beforeEach(() => {
 });
 
 describe("OIDC core", () => {
-	test("signs in, completes the callback, and resolves the user", async () => {
+	test("signs in, completes the callback, resolves the user, and signs out", async () => {
 		const auth = core();
 		const jar = new Map<string, string>();
 
@@ -143,6 +143,28 @@ describe("OIDC core", () => {
 			name: "Alice",
 			picture: null,
 			roles: ["stellar"],
+		});
+
+		const out = await auth.signOut(
+			request("/logout", jar),
+			jar,
+			resolved.session,
+		);
+		apply(jar, out.setCookies);
+		expect(jar.size).toBe(0);
+		expect(revocations.revoke).toHaveBeenCalledWith(
+			resolved.session?.sid,
+			expect.any(Number),
+		);
+		expect(oidc.tokenRevocation).toHaveBeenCalledWith(
+			expect.anything(),
+			"refresh",
+			{ token_type_hint: "refresh_token" },
+		);
+		expect(Object.fromEntries(new URL(out.location).searchParams)).toEqual({
+			client_id: "sage-web",
+			post_logout_redirect_uri: "https://sage.test/login",
+			id_token_hint: "id-token",
 		});
 	});
 
@@ -235,6 +257,39 @@ describe("OIDC core", () => {
 		expect(setCookies[0]).not.toContain("Secure");
 	});
 
+	test("falls back to the app's post-logout path without an end-session endpoint", async () => {
+		oidc.metadata.end_session_endpoint = "";
+
+		const out = await core().signOut(request("/logout"), new Map(), null);
+
+		expect(out.location).toBe("https://sage.test/login");
+	});
+
+	test("signs out locally and reports an unreachable provider", async () => {
+		const onError = vi.fn();
+		const failure = new Error("offline");
+		oidc.buildEndSessionUrl.mockImplementationOnce(() => {
+			throw failure;
+		});
+		const auth = createOidcCore({
+			allowSession,
+			revocations,
+			environment: () => env,
+			onError,
+		});
+
+		const out = await auth.signOut(request("/logout"), new Map(), null, {
+			correlationId: "req-1",
+		});
+
+		expect(out.location).toBe("https://sage.test/login");
+		expect(onError).toHaveBeenCalledWith({
+			operation: "end-session",
+			error: failure,
+			context: { correlationId: "req-1" },
+		});
+	});
+
 	test("emits a correlated service log without provider error contents", () => {
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -317,4 +372,53 @@ describe("withinDeadline", () => {
 		expect(result).toMatchObject({ ok: false });
 		expect(result.ok || result.error).toBeInstanceOf(OidcDeadlineError);
 	});
+});
+
+test("still signs out when the provider cannot revoke the refresh token", async () => {
+	const onError = vi.fn();
+	oidc.tokenRevocation.mockRejectedValueOnce(new Error("offline"));
+	const auth = createOidcCore({
+		allowSession,
+		revocations,
+		environment: () => env,
+		onError,
+	});
+	const session = {
+		user: { sub: "alice", email: "a@x.test", name: null, roles: ["stellar"] },
+		accessToken: "a",
+		refreshToken: "r",
+		expiresAt: 0,
+		sid: "s1",
+		issuedAt: 0,
+		lastSeenAt: 0,
+	};
+
+	const out = await auth.signOut(request("/logout"), new Map(), session);
+
+	expect(out.location).toContain("https://idp.test/logout");
+	expect(revocations.revoke).toHaveBeenCalledWith("s1", expect.any(Number));
+	expect(onError).toHaveBeenCalledWith(
+		expect.objectContaining({ operation: "token-revocation" }),
+	);
+});
+test.each([
+	false,
+	true,
+])("sign-out fails when revocation persistence fails (everywhere=%s)", async (everywhere) => {
+	const failure = new Error("database unavailable");
+	if (everywhere) revocations.revokeAllFor.mockRejectedValueOnce(failure);
+	else revocations.revoke.mockRejectedValueOnce(failure);
+	const auth = core();
+	const session = {
+		user: { sub: "alice", email: "a@x.test", name: null, roles: ["stellar"] },
+		accessToken: "a",
+		refreshToken: "r",
+		expiresAt: 0,
+		sid: "s1",
+		issuedAt: 0,
+		lastSeenAt: 0,
+	};
+	await expect(
+		auth.signOut(request("/logout"), new Map(), session, undefined, everywhere),
+	).rejects.toBe(failure);
 });

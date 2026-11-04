@@ -228,6 +228,27 @@ describe("provider", () => {
 		});
 	});
 
+	test("builds a logout URL with id_token_hint, or none without an endpoint", async () => {
+		const provider = createProvider(settings);
+
+		const url = await provider.endSessionUrl({
+			idTokenHint: "id",
+			postLogoutRedirectUri: "https://sage.test/login",
+		});
+		oidc.metadata.end_session_endpoint = "";
+
+		expect(Object.fromEntries(new URL(url ?? "").searchParams)).toEqual({
+			client_id: "sage-web",
+			post_logout_redirect_uri: "https://sage.test/login",
+			id_token_hint: "id",
+		});
+		await expect(
+			provider.endSessionUrl({
+				postLogoutRedirectUri: "https://sage.test/login",
+			}),
+		).resolves.toBeNull();
+	});
+
 	test.each([
 		["an absolute URL", "https://cdn.test/a.png", "https://cdn.test/a.png"],
 		[
