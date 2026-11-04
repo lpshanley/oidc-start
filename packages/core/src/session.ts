@@ -203,13 +203,13 @@ export function createSessionManager({
 				})
 				: refreshOnce(refreshToken, session.user.sub, context));
 			if (!refreshedTokens) return { session: null, setCookies: [] };
-			const { roles, ...tokens } = refreshedTokens;
+			const { roles, email, ...tokens } = refreshedTokens;
 			const refreshed: Session = {
 				...session,
 				...tokens,
 				...(refreshCoordinator && { refreshGeneration: (session.refreshGeneration ?? 0) + 1 }),
 				idToken: tokens.idToken ?? session.idToken,
-				user: { ...session.user, roles },
+				user: { ...session.user, roles, email: email ?? session.user.email },
 				lastSeenAt: now,
 			};
 			if (!(await isAllowed(refreshed.user))) {

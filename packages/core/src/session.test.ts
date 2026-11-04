@@ -324,6 +324,19 @@ describe("session lifetime and revocation", () => {
 		expect(apply(jar, result.setCookies).size).toBe(0);
 	});
 
+	test.each([false, true])("rechecks the refreshed email (coordinated=%s)", async (coordinated) => {
+		const { manager, refresh } = setup(
+			(user) => user.email.endsWith("@sage.test"),
+			coordinated ? { run: (_request, produce) => produce() } : undefined,
+		);
+		refresh.mockResolvedValueOnce({ roles: [], email: "alice@other.test", accessToken: "next", expiresAt: 2000 });
+		const jar = await jarWith({ ...fresh, expiresAt: 1010 });
+		const result = await manager.resolve(jar);
+		expect(refresh).toHaveBeenCalledOnce();
+		expect(result.session).toBeNull();
+		expect(apply(jar, result.setCookies).size).toBe(0);
+	});
+
 	test("ends sessions that are revoked, too old, or no longer members", async () => {
 		const { manager, refresh } = setup();
 

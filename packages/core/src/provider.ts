@@ -18,8 +18,8 @@ export type TokenSet = {
 	refreshExpiresAt?: number;
 };
 
-/** Tokens from a refresh, with roles re-read so membership changes apply. */
-export type RefreshedTokens = TokenSet & { roles: string[] };
+/** Tokens and current policy claims for the same subject. */
+export type RefreshedTokens = TokenSet & { roles: string[]; email?: string };
 
 /** Used when a token response omits expires_in, so refresh is still attempted. */
 const DEFAULT_TOKEN_LIFETIME_SECONDS = 300;
@@ -271,15 +271,17 @@ export function createProvider(
 					error: "invalid_grant",
 				});
 			let roles = roleList(claims?.[settings.OIDC_ROLES_CLAIM]);
-			if (roles === undefined && config.serverMetadata().userinfo_endpoint) {
+			let email = firstString(claims?.email);
+			if ((roles === undefined || !email) && config.serverMetadata().userinfo_endpoint) {
 				const info = await client.fetchUserInfo(
 					config,
 					response.access_token,
 					sub,
 				);
-				roles = roleList(info[settings.OIDC_ROLES_CLAIM]);
+				roles ??= roleList(info[settings.OIDC_ROLES_CLAIM]);
+				email ??= firstString(info.email);
 			}
-			return { ...tokenSet(response, refreshToken), roles: roles ?? [] };
+			return { ...tokenSet(response, refreshToken), roles: roles ?? [], ...(email && { email }) };
 		},
 
 		/**
