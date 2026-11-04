@@ -1,5 +1,9 @@
 # @lpshanley/oidc-start-core
 
+## 0.2.0
+
+Core and the React adapter are versioned together. This release pairs core with the adapter's new public exports.
+
 ## 0.1.0
 
 First stable release of the Node.js OIDC core. Changes since the last prerelease:
