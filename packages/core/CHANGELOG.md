@@ -1,5 +1,18 @@
 # @lpshanley/oidc-start-core
 
+## 0.1.0
+
+First stable release of the Node.js OIDC core. Changes since the last prerelease:
+
+- Revocation lookups receive only the app session ID, subject, issue time, and optional provider session ID.
+- Providers without a UserInfo endpoint can sign users in using the email in the ID token. Missing roles resolve to an empty list at sign-in and refresh.
+- `isAuthorizationDenied(error)` from `@lpshanley/oidc-start-core/provider` recognizes a provider’s `access_denied` authorization response across bundles.
+- Sign-in and grant callbacks now verify the browser’s state and return the provider’s error when authorization ends without a code.
+- Multi-replica hosts can provide a shared `refreshCoordinator`. The PostgreSQL example implements coordination and durable session revocation. Single-instance deployments can keep their existing configuration.
+- Revocation lookup failures during session resolution now report `revocation-read`. Update monitoring rules that previously counted those failures under `refresh`.
+
+The npm package declares MIT and includes the license text.
+
 ## 0.1.0-next.1
 
 - 64096ef: Document how to install the core, handle sign-in and callback cookies, and implement shared session revocation storage.

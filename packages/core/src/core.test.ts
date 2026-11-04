@@ -522,7 +522,9 @@ test.each([false, true])("sign-out can be retried after a revocation read outage
 	const callback = await auth.callback(request(`/callback?code=c&state=${state}`, jar), jar);
 	apply(jar, callback.setCookies);
 	const logout = request("/logout", jar);
-	const blocked = await auth.resolve(logout);
+	const call = { correlationId: "logout-retry" };
+	const blocked = await auth.resolve(logout, call);
+	expect(auth.report).toHaveBeenCalledWith({ operation: "revocation-read", error: failure, context: call });
 	expect(blocked).toMatchObject({ session: null, setCookies: [] });
 	await expect(auth.signOut(logout, blocked.cookies, blocked.session, undefined, everywhere))
 		.rejects.toBe(failure);

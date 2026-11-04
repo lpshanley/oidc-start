@@ -1,0 +1,11 @@
+{
+  "name": "oidc-start-postgres-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:postgres": "node --test store.test.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.16.0"
+  }
+}

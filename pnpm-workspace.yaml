@@ -1,6 +1,7 @@
 packages:
   - 'packages/*'
   - 'examples/tanstack-start'
+  - 'examples/postgres'
 
 catalogMode: prefer
 catalog:

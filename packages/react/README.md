@@ -4,12 +4,14 @@ Add OpenID Connect sign-in to a TanStack Start app. Loaders can read the current
 
 This guide adds two routes to an existing app. The home page at `/` shows who is signed in. The callback at `/callback` receives the browser when the provider sends it back. [Complete example app](https://github.com/lpshanley/oidc-start/tree/main/examples/tanstack-start)
 
+For multi-replica deployment, see the [production guide](https://github.com/lpshanley/oidc-start/blob/main/docs/production.md) and [tested PostgreSQL example](https://github.com/lpshanley/oidc-start/tree/main/examples/postgres).
+
 ## 1. Install and configure the server
 
 Use Node.js 22.12 or newer. Your app supplies `@tanstack/react-start@^1.169.2` and `@tanstack/react-router@^1.170.44`. Install both OIDC packages because your app imports the core directly.
 
 ```sh
-npm install @lpshanley/oidc-start-react@next @lpshanley/oidc-start-core@next
+npm install @lpshanley/oidc-start-react @lpshanley/oidc-start-core
 ```
 
 Register a confidential web client with your OIDC provider. If your app runs at `http://localhost:5173`, register these exact URLs. Use your public HTTPS origin in production.

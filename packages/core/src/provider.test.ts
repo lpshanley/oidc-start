@@ -52,7 +52,8 @@ function tokenResponse(
 beforeEach(() => {
 	vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
 	oidc.metadata.end_session_endpoint = "https://idp.test/logout";
-	oidc.fetchUserInfo.mockResolvedValue({ sub: "alice" });
+	oidc.metadata.userinfo_endpoint = "https://idp.test/userinfo";
+	oidc.fetchUserInfo.mockReset().mockResolvedValue({ sub: "alice" });
 });
 
 describe("provider", () => {
@@ -188,6 +189,32 @@ describe("provider", () => {
 		await expect(
 			provider.exchangeCode(new URL("https://s.test/cb"), checks),
 		).rejects.toThrow("no email");
+	});
+
+	test("uses ID token claims and still requires email without a UserInfo endpoint", async () => {
+		delete oidc.metadata.userinfo_endpoint;
+		oidc.authorizationCodeGrant
+			.mockResolvedValueOnce(tokenResponse({}, { sub: "alice", email: "alice@x.test" }))
+			.mockResolvedValueOnce(tokenResponse({}, { sub: "alice" }));
+		const provider = createProvider(settings);
+		const callback = new URL("https://s.test/cb");
+		const checks = { state: "s", nonce: "n", codeVerifier: "v" };
+
+		await expect(provider.exchangeCode(callback, checks)).resolves.toMatchObject({
+			user: { email: "alice@x.test", roles: [] },
+		});
+		await expect(provider.exchangeCode(callback, checks)).rejects.toThrow("no email");
+		expect(oidc.fetchUserInfo).not.toHaveBeenCalled();
+	});
+
+	test("refreshes with no roles when the provider omits the UserInfo endpoint", async () => {
+		delete oidc.metadata.userinfo_endpoint;
+		oidc.refreshTokenGrant.mockResolvedValueOnce(tokenResponse({ access_token: "new-access" }, undefined));
+
+		await expect(createProvider(settings).refresh("r", "alice")).resolves.toMatchObject({
+			accessToken: "new-access", roles: [],
+		});
+		expect(oidc.fetchUserInfo).not.toHaveBeenCalled();
 	});
 
 	test.each([

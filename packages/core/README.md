@@ -4,12 +4,14 @@ OpenID Connect sign-in for Node.js servers. Give the core a standard `Request` a
 
 Building a TanStack Start app? The React adapter connects the core to Start’s request middleware, routes, and server functions. [TanStack Start quickstart](https://www.npmjs.com/package/@lpshanley/oidc-start-react)
 
+For multi-replica deployment, see the [production guide](https://github.com/lpshanley/oidc-start/blob/main/docs/production.md) and [tested PostgreSQL example](https://github.com/lpshanley/oidc-start/tree/main/examples/postgres).
+
 ## Install and register your app
 
-Use Node.js 22.12 or newer with ES modules. Install the current prerelease from npm.
+Use Node.js 22.12 or newer with ES modules. Install the package from npm.
 
 ```sh
-npm install @lpshanley/oidc-start-core@next
+npm install @lpshanley/oidc-start-core
 ```
 
 Register a **confidential web client** with your OIDC provider. For the example below, register `http://localhost:5173/callback` as the sign-in redirect URI and `http://localhost:5173/` as the post-logout redirect URI. In production, use your app’s public HTTPS origin for both.
@@ -21,7 +23,7 @@ Register a **confidential web client** with your OIDC provider. For the example 
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | The credentials issued to your web client. |
 | `SESSION_SECRET` | Generate once with `openssl rand -hex 32`. Keep the same secret across restarts and server instances. |
 | `OIDC_SCOPES` | Optional. Defaults to `openid profile email offline_access`. The provider must supply an email in the ID token or through UserInfo. |
-| `OIDC_ROLES_CLAIM` | Optional. Defaults to `roles`. Set this to the claim your provider uses if your policy checks roles. |
+| `OIDC_ROLES_CLAIM` | Optional. Defaults to `roles`. If the ID token omits this claim, the core checks UserInfo when the provider advertises it. Without either source, your policy receives an empty role list. |
 
 ## Create the core
 
@@ -52,6 +54,7 @@ Mount these handlers at `GET /sign-in` and `GET /callback` in your server. The f
 
 ```ts
 import { SessionAccessDeniedError } from '@lpshanley/oidc-start-core'
+import { isAuthorizationDenied } from '@lpshanley/oidc-start-core/provider'
 import { auth } from './auth.server.js'
 
 function authHeaders(cookies: string[]) {
@@ -73,6 +76,9 @@ export async function callback(request: Request) {
   const result = await auth.callback(request, cookies)
   const headers = authHeaders([...setCookies, ...result.setCookies])
   if (!result.ok) {
+    if (isAuthorizationDenied(result.error)) {
+      return new Response('Authorization was declined.', { status: 403, headers })
+    }
     const denied = result.error instanceof SessionAccessDeniedError
     return new Response(denied ? 'Access denied.' : 'Please sign in again.', {
       status: denied ? 403 : 400, headers,
@@ -84,6 +90,8 @@ export async function callback(request: Request) {
 ```
 
 On an ordinary request, `const { session, setCookies } = await auth.resolve(request)` gives you `session?.user`. Forward **each** returned `Set-Cookie` header separately, even on a signed-out response. A read can refresh a session or clear an expired cookie. Keep the full session on the server because it contains provider tokens. Browser code can use `AuthUser`, `displayName`, and `hasRole` from `@lpshanley/oidc-start-core/models`.
+
+If you use `provider.exchangeCode()` directly, import `isAuthorizationDenied` from `@lpshanley/oidc-start-core/provider` and pass it the caught error. It recognizes the provider’s `access_denied` response across bundles. Other responses, such as `login_required`, and network failures return `false`.
 
 ## End a session
 

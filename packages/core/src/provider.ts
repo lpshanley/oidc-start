@@ -81,6 +81,14 @@ export const PROVIDER_TIMEOUT_MS = 5_000;
 
 /** The provider has not received a token refresh request. */
 export class RefreshNotDispatched extends Error {}
+
+/** Whether the provider returned access_denied in its authorization response. */
+export function isAuthorizationDenied(error: unknown): boolean {
+	return typeof error === "object" && error !== null
+		&& "code" in error && error.code === "OAUTH_AUTHORIZATION_RESPONSE_ERROR"
+		&& "error" in error && error.error === "access_denied";
+}
+
 export function createProvider(
 	settings: OidcConfiguration,
 	timeoutMs = PROVIDER_TIMEOUT_MS,
@@ -207,7 +215,7 @@ export function createProvider(
 			let email = firstString(claims.email);
 			const tokenRoles = roleList(claims[settings.OIDC_ROLES_CLAIM]);
 			let info: client.UserInfoResponse | undefined;
-			if (!email || tokenRoles === undefined) {
+			if ((!email || tokenRoles === undefined) && config.serverMetadata().userinfo_endpoint) {
 				info = await client.fetchUserInfo(
 					config,
 					response.access_token,
@@ -246,15 +254,15 @@ export function createProvider(
 					error: "invalid_grant",
 				});
 			let roles = roleList(claims?.[settings.OIDC_ROLES_CLAIM]);
-			if (roles === undefined) {
+			if (roles === undefined && config.serverMetadata().userinfo_endpoint) {
 				const info = await client.fetchUserInfo(
 					config,
 					response.access_token,
 					sub,
 				);
-				roles = roleList(info[settings.OIDC_ROLES_CLAIM]) ?? [];
+				roles = roleList(info[settings.OIDC_ROLES_CLAIM]);
 			}
-			return { ...tokenSet(response, refreshToken), roles };
+			return { ...tokenSet(response, refreshToken), roles: roles ?? [] };
 		},
 
 		/**

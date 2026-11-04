@@ -230,7 +230,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			? [expire(verifierCookieName(prefix(), state))]
 			: [];
 		try {
-			if (!state || !url.searchParams.get("code")) {
+			if (!state || !(url.searchParams.get("code") || url.searchParams.get("error"))) {
 				throw new OidcStateError("missing");
 			}
 			const flow = await verifyCallbackState({
@@ -269,6 +269,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		password,
 		provider,
 		revocations: options.revocations,
+		refreshCoordinator: options.refreshCoordinator,
 		allowSession: options.allowSession,
 	});
 
@@ -278,7 +279,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			const cookies = parseCookies(request.headers.get("cookie"));
 			const { session, setCookies } = await sessions.resolve(
 				cookies,
-				(error) => onError({ operation: "refresh", error, context }),
+				(error, operation) => onError({ operation, error, context }),
 				(work) => withinDeadline(work, context),
 				context,
 			);
