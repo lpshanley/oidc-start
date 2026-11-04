@@ -188,13 +188,23 @@ describe("session manager", () => {
 describe("session lifetime and revocation", () => {
 	const at = (seconds: number) => vi.setSystemTime(seconds * 1000);
 
-	test("ends sessions that are revoked, idle, too old, or no longer members", async () => {
+	test("clears an idle session while its access token is still valid", async () => {
+		const { manager, refresh } = setup();
+		const idleLimit = 12 * 60 * 60;
+		const jar = await jarWith({ ...fresh, expiresAt: fresh.issuedAt + 2 * idleLimit });
+
+		at(fresh.lastSeenAt + idleLimit + 1);
+		const result = await manager.resolve(jar);
+
+		expect(result.session).toBeNull();
+		expect(apply(jar, result.setCookies).size).toBe(0);
+		expect(refresh).not.toHaveBeenCalled();
+	});
+
+	test("ends sessions that are revoked, too old, or no longer members", async () => {
 		const { manager, refresh } = setup();
 
 		revocations.isRevoked.mockResolvedValueOnce(true);
-		expect((await manager.resolve(await jarWith(fresh))).session).toBeNull();
-
-		at(1_000 + 60 * 60 * 12 + 1);
 		expect((await manager.resolve(await jarWith(fresh))).session).toBeNull();
 
 		at(1_000 + 60 * 60 * 24 * 30 + 1);
