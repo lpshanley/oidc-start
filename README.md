@@ -57,6 +57,8 @@ Keep both archives with the app's manifest and lockfile so CI can run a frozen i
 
 To check the integration, open `/` in a fresh browser session. It should show **Sign in**. With the provider configured, sign in, confirm the callback returns you to `/` with your name, then sign out and reload. The page should show **Sign in** again.
 
+The example sends callback failures to `/login`, where visitors can dismiss the message or try signing in again. [Callback-error recipe](packages/react/README.md#customize-callback-failures)
+
 ## Migrating existing applications
 
 When upgrading the React adapter from 0.3.x to 0.4.0, rename the `OidcAuthProvider` import and JSX tags to `AuthProvider`. Continue importing it from `@lpshanley/oidc-start-react/client` and pass the root loader result as its `auth` prop.

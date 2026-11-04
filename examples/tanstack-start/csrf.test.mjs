@@ -14,8 +14,8 @@ test("rejects a sibling-origin form before dispatching any server function", asy
 
 test("lets the provider redirect reach the callback without an Origin header", async () => {
 	const response = await app.fetch(new Request("https://app.example.test/callback"));
-	assert.equal(response.status, 400);
-	assert.match(await response.text(), /Restart sign-in/);
+	assert.equal(response.status, 303);
+	assert.equal(response.headers.get("location"), "/login?auth_error=invalid_callback");
 });
 
 test("protected navigation redirects a guest locally without starting a provider flow", async () => {

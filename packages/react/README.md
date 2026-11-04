@@ -202,7 +202,20 @@ GET: handleCallbackRoute({
 })
 ```
 
-On that page, import `authErrorMessage` from `@lpshanley/oidc-start-react`. Read `auth_error` from the route's search parameters and render `<p role="alert">{authErrorMessage(auth_error)}</p>` when the parameter is present. The helper selects fixed messages and gives unknown values a generic retry message. Host access denials keep their 403 response.
+On the login page, read `auth_error` with `Route.useSearch()`. When the parameter is present, render `<p role="alert">{authErrorMessage(auth_error)}</p>` using `authErrorMessage` from `@lpshanley/oidc-start-react`. Unknown values receive a generic retry message. Host access denials keep their 403 response.
+
+Keep the message visible until the user chooses **Dismiss**. Inside the login component, bind `const navigate = Route.useNavigate()` and use this click handler. It removes only the error parameter, preserves the fragment and replaces the current history entry so Back returns to the preceding page.
+
+```tsx
+<button onClick={() => navigate({
+  search: previous => ({ ...previous, auth_error: undefined }),
+  hash: true,
+  replace: true,
+  resetScroll: false,
+})}>Dismiss</button>
+```
+
+The working example wires the callback to the login page and includes the route's search validation. [Callback](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/callback.ts) · [Dismissible login error](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/login.tsx)
 
 ### Require a recent login
 
