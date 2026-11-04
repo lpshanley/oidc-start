@@ -22,6 +22,9 @@ vi.mock("@tanstack/react-start", () => ({
 }));
 const core = {
 	resolve: vi.fn(),
+	signIn: vi.fn(),
+	callback: vi.fn(),
+	signOut: vi.fn(),
 	report: vi.fn(),
 };
 const createOidcCore = vi.fn(() => core);
@@ -31,8 +34,24 @@ vi.mock("@lpshanley/oidc-start-core", () => ({
 }));
 
 const { oidcMiddleware } = await import("./middleware.js");
+const routes = await import("./routes.server.js");
 
 const alice = { sub: "alice", email: "alice@sage.test", name: "Alice" };
+
+function context(overrides: Partial<OidcContext> = {}) {
+	const appended: string[] = [];
+	start.context = {
+		core: core as unknown as OidcContext["core"],
+		request: new Request("https://sage.test/"),
+		cookies: new Map(),
+		session: null,
+		call: { correlationId: "req-1" },
+		auth: () => ({ user: null }),
+		appendSetCookie: (line) => appended.push(line),
+		...overrides,
+	};
+	return appended;
+}
 
 beforeEach(() => {
 	start.context = undefined;
@@ -127,5 +146,108 @@ describe("getOidcContext", () => {
 		const { getOidcContext } = await import("./context.js");
 
 		expect(getOidcContext).toThrow("Add oidcMiddleware()");
+	});
+});
+
+describe("route handlers", () => {
+	test("sign-in redirects to the provider and queues the verifier", async () => {
+		const appended = context();
+		core.signIn.mockResolvedValue({
+			url: "https://idp.test/authorize?x=1",
+			setCookies: ["sage-verifier-1=x"],
+		});
+
+		const response = await routes.signInRoute(
+			new Request("https://sage.test/api/auth/sign-in?returnPathname=%2Fp"),
+			{},
+		);
+
+		expect(core.signIn).toHaveBeenCalledWith(
+			expect.any(Request),
+			expect.any(Map),
+			"/p",
+			{ correlationId: "req-1" },
+		);
+		expect(response.status).toBe(307);
+		expect(response.headers.get("location")).toBe(
+			"https://idp.test/authorize?x=1",
+		);
+		expect(appended).toEqual(["sage-verifier-1=x"]);
+	});
+
+	test("callback redirects on success and reports hidden failures", async () => {
+		const appended = context();
+		const request = new Request("https://sage.test/api/auth/callback?code=c");
+		core.callback
+			.mockResolvedValueOnce({
+				ok: true,
+				location: "https://sage.test/p",
+				setCookies: ["s=1"],
+			})
+			.mockResolvedValueOnce({
+				ok: false,
+				error: new Error("secret detail"),
+				setCookies: ["v=; Max-Age=0"],
+			})
+			.mockResolvedValueOnce({
+				ok: false,
+				error: new Error("secret detail"),
+				setCookies: [],
+			});
+
+		const ok = await routes.callbackRoute(request, {});
+		const redirected = await routes.callbackRoute(request, {
+			errorRedirectUrl: "/login?error=1",
+		});
+		const plain = await routes.callbackRoute(request, {});
+
+		expect([ok.status, ok.headers.get("location")]).toEqual([
+			307,
+			"https://sage.test/p",
+		]);
+		expect([redirected.status, redirected.headers.get("location")]).toEqual([
+			303,
+			"https://sage.test/login?error=1",
+		]);
+		expect(plain.status).toBe(400);
+		expect(await plain.text()).not.toContain("secret detail");
+		expect(core.report).toHaveBeenCalledTimes(2);
+		expect(core.report).toHaveBeenCalledWith({
+			operation: "callback",
+			error: new Error("secret detail"),
+			context: { correlationId: "req-1" },
+		});
+		expect(appended).toEqual(["s=1", "v=; Max-Age=0"]);
+	});
+
+	test("sign-out accepts only POST and redirects to the provider logout", async () => {
+		const appended = context({
+			session: { user: alice } as OidcContext["session"],
+		});
+		core.signOut.mockResolvedValue({
+			location: "https://idp.test/logout",
+			setCookies: ["s=; Max-Age=0"],
+		});
+
+		const get = await routes.signOutRoute(
+			new Request("https://sage.test/logout"),
+		);
+		const post = await routes.signOutRoute(
+			new Request("https://sage.test/logout", { method: "POST" }),
+		);
+
+		expect([get.status, get.headers.get("allow")]).toEqual([405, "POST"]);
+		expect([post.status, post.headers.get("location")]).toEqual([
+			303,
+			"https://idp.test/logout",
+		]);
+		expect(core.signOut).toHaveBeenCalledWith(
+			expect.any(Request),
+			expect.any(Map),
+			{ user: alice },
+			{ correlationId: "req-1" },
+			false,
+		);
+		expect(appended).toEqual(["s=; Max-Age=0"]);
 	});
 });
