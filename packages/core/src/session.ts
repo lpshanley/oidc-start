@@ -1,4 +1,4 @@
-import type { OidcCallContext } from "./config.js";
+import type { OidcCallContext, OidcMiddlewareOptions } from "./config.js";
 import { z } from "zod";
 import {
 	type CookieOptions,
@@ -74,7 +74,7 @@ export function createSessionManager({
 	revocations: SessionRevocations;
 	refreshCoordinator?: SessionRefreshCoordinator;
 	/** Whether the (possibly refreshed) user may keep a session. */
-	allowSession: (user: Session["user"]) => boolean;
+	allowSession: OidcMiddlewareOptions["allowSession"];
 }) {
 	const refreshes = new Map<
 		string,
@@ -124,6 +124,10 @@ export function createSessionManager({
 		return clearChunked(cookies, name(), cookieOptions());
 	}
 
+	async function isAllowed(user: Session["user"]) {
+		return (await allowSession(user)) === true;
+	}
+
 	// Verify the cookie, host policy, lifetimes, and revocation before using it.
 	// A store read failure propagates so sign-out can be retried.
 	async function readActive(
@@ -144,7 +148,7 @@ export function createSessionManager({
 		if (
 			now - session.issuedAt > maxAgeSeconds ||
 			now - session.lastSeenAt > idleSeconds ||
-			!allowSession(session.user)
+			!(await isAllowed(session.user))
 		) {
 			return { session: null, setCookies: clear(cookies) };
 		}
@@ -207,7 +211,7 @@ export function createSessionManager({
 				user: { ...session.user, roles },
 				lastSeenAt: now,
 			};
-			if (!allowSession(refreshed.user)) {
+			if (!(await isAllowed(refreshed.user))) {
 				return { session: null, setCookies: clear(cookies) };
 			}
 			return {
@@ -222,7 +226,7 @@ export function createSessionManager({
 		}
 	}
 
-	return { readActive, resolve, write, clear };
+	return { isAllowed, readActive, resolve, write, clear };
 }
 
 export type SessionManager = ReturnType<typeof createSessionManager>;

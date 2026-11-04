@@ -122,8 +122,8 @@ export type OidcErrorEvent = {
 };
 
 export type OidcMiddlewareOptions = AuthServiceOptions & {
-	/** The host decides who may start or keep a session. */
-	allowSession: (user: AuthUser) => boolean;
+	/** The host must return or resolve to true to start or keep a session. */
+	allowSession: (user: AuthUser) => boolean | Promise<boolean>;
 	/** Server-side record of ended sessions. */
 	revocations: SessionRevocations;
 	/** Share rotating session refreshes between app instances. */

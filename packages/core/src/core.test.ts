@@ -183,11 +183,15 @@ describe("OIDC core", () => {
 		});
 	});
 
-	test("an authenticated user denied by the host receives no session cookie", async () => {
+	test.each([
+		["a synchronous denial", () => false],
+		["an asynchronous denial", async () => false],
+		["a truthy non-boolean from JavaScript", () => "false" as unknown as boolean],
+	])("an authenticated user receives no session cookie for %s", async (_, deny) => {
 		const auth = createOidcCore({
 			environment: () => env,
 			revocations,
-			allowSession: () => false,
+			allowSession: deny,
 		});
 		const jar = new Map<string, string>();
 		const start = await auth.signIn(request("/"), jar);

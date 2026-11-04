@@ -331,7 +331,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			if (!result.ok) return result;
 			const { user, tokens, idpSid, authTime, flow, clearVerifier } = result;
 			try {
-				if (!options.allowSession(user)) throw new SessionAccessDeniedError();
+					if (!(await sessions.isAllowed(user))) throw new SessionAccessDeniedError();
 				const now = Math.floor(Date.now() / 1000);
 				return {
 					ok: true,
