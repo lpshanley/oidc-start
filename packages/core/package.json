@@ -1,0 +1,42 @@
+{
+  "name": "@lpshanley/oidc-start-core",
+  "version": "0.1.0-next.0",
+  "description": "OpenID Connect sign-in, grants and sessions for Node.js",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./models": {
+      "types": "./dist/models.d.ts",
+      "import": "./dist/models.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check-package": "publint --strict"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "publint": "catalog:",
+    "@types/node": "catalog:"
+  }
+}
