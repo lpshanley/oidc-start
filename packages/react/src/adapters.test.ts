@@ -178,6 +178,24 @@ describe("route handlers", () => {
 		expect(appended).toEqual(["sage-verifier-1=x"]);
 	});
 
+	test.each([[undefined, "300", 300], [60, "300", 60], [60, "0", 0]] as const)(
+		"a sign-in link can tighten the route's maxAge (%s, %s)", async (configured, query, expected) => {
+			context();
+			core.signIn.mockResolvedValue({ url: "https://idp.test/authorize", setCookies: [] });
+			const response = await routes.signInRoute(new Request("https://sage.test/sign-in?maxAge=" + query), { maxAge: configured });
+			expect(response.status).toBe(307);
+			expect(core.signIn.mock.lastCall?.[2].maxAge).toBe(expected);
+		},
+	);
+
+	test("rejects invalid maxAge before starting sign-in", async () => {
+		context();
+		core.signIn.mockClear();
+		const response = await routes.signInRoute(new Request("https://sage.test/sign-in?maxAge=-1"), {});
+		expect(response.status).toBe(400);
+		expect(core.signIn).not.toHaveBeenCalled();
+	});
+
 	test("callback redirects on success and reports hidden failures", async () => {
 		const appended = context();
 		const request = new Request("https://sage.test/api/auth/callback?code=c");
@@ -300,6 +318,13 @@ test("recent auth uses the provider login time, including the boundary, and fail
 });
 
 describe("server function bodies", () => {
+	test("recent auth returns only a fresh user", () => {
+		const authTime = Math.floor(Date.now() / 1000) - 60;
+		context({ session: { authTime } as OidcContext["session"], auth: () => ({ user: alice }) });
+		expect(functions.getRecentAuthBody(300)).toEqual({ user: alice });
+		expect(functions.getRecentAuthBody(30)).toEqual({ user: null });
+	});
+
 	test("getAuth returns only the user and is not cached", () => {
 		context({ auth: () => ({ user: alice }) });
 
@@ -310,7 +335,7 @@ describe("server function bodies", () => {
 		);
 	});
 
-	test("signOut queues the cleared session and throws a document redirect", async () => {
+	test.each([undefined, true])("signOut forwards everywhere=%s and follows provider logout", async (everywhere) => {
 		const appended = context();
 		core.signOut.mockResolvedValue({
 			location: "https://idp.test/logout",
@@ -318,9 +343,10 @@ describe("server function bodies", () => {
 		});
 
 		const thrown = await functions
-			.signOutBody()
+			.signOutBody(everywhere)
 			.catch((error: unknown) => error);
 
+		expect(core.signOut.mock.lastCall?.[4]).toBe(everywhere ?? false);
 		expect(appended).toEqual(["s=; Max-Age=0"]);
 		expect(thrown).toMatchObject({
 			options: { href: "https://idp.test/logout", reloadDocument: true },

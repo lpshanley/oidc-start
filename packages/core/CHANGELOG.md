@@ -1,5 +1,9 @@
 # @lpshanley/oidc-start-core
 
+## 0.4.0
+
+Versioned together with the React adapter for its new route guards and UI helpers.
+
 ## 0.3.0
 
 ### Minor Changes

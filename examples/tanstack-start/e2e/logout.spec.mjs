@@ -15,6 +15,9 @@ test("the signOut RPC navigates the document through provider logout", async ({ 
 	// The root loader supplies the account on the first render, before hydration.
 	const ssr = await page.request.get("/");
 	expect(await ssr.text()).toContain("Round Trip Tester");
+	const account = await page.request.get("/account", { maxRedirects: 0 });
+	expect(account.status()).toBe(200);
+	expect(await account.text()).toContain("Account for");
 	await page.reload({ waitUntil: "networkidle" });
 	await expect(identity).toBeVisible();
 	const sessionCookies = async () => (await context.cookies(baseURL)).filter((c) => c.name.includes("example_session"));

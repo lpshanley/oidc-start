@@ -1,8 +1,8 @@
 # @lpshanley/oidc-start-react
 
-Add OpenID Connect sign-in to a TanStack Start app. Loaders can read the current user, components can start sign-in or sign-out, and Start’s middleware handles the session cookies. The code exchange and provider tokens stay on the server.
+Add OpenID Connect sign-in to a TanStack Start app. Loaders can read the current user, components can start sign-in or sign-out, and Start’s middleware handles the session cookies. The server exchanges the authorization code. Loaders and React components receive the user profile.
 
-This guide adds two routes to an existing app. The home page at `/` shows who is signed in. The callback at `/callback` receives the browser when the provider sends it back. [Complete example app](https://github.com/lpshanley/oidc-start/tree/main/examples/tanstack-start)
+The quickstart connects a root loader, a home page at `/` and a callback at `/callback`. The example also includes `/sign-in`, a guarded `/account` page and a `/settings` page that requires a recent login. [Complete example app](https://github.com/lpshanley/oidc-start/tree/main/examples/tanstack-start)
 
 For multi-replica deployment, see the [production guide](https://github.com/lpshanley/oidc-start/blob/main/docs/production.md) and [tested PostgreSQL example](https://github.com/lpshanley/oidc-start/tree/main/examples/postgres).
 
@@ -64,64 +64,157 @@ export const Route = createFileRoute('/callback')({
 })
 ```
 
-## 4. Connect the buttons
+## 4. Load the user in the root route
 
-In `src/routes/index.tsx`, call `getAuth()` from the loader. It returns `{ user }`, with `user: null` for a signed-out visitor. Bind `signOut` with `useServerFn` so TanStack follows the redirect to the provider when the user clicks the button.
+In `src/routes/__root.tsx`, call `getAuth()` from the loader. It returns `{ user }`, with `user: null` for a guest. Pass the result to `AuthProvider` so descendants share the user on the first render and after navigation. [Example root route](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/__root.tsx)
+
+```tsx
+import { AuthProvider } from '@lpshanley/oidc-start-react/client'
+import { getAuth } from '@lpshanley/oidc-start-react/functions'
+import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router'
+
+export const Route = createRootRoute({ loader: () => getAuth(), component: Root })
+
+function Root() {
+  const auth = Route.useLoaderData()
+  return (
+    <html lang="en">
+      <head><HeadContent /></head>
+      <body>
+        <AuthProvider auth={auth}><Outlet /></AuthProvider>
+        <Scripts />
+      </body>
+    </html>
+  )
+}
+```
+
+Upgrading from 0.3.x? Rename the `OidcAuthProvider` import and JSX tags to `AuthProvider`. It takes the same `auth` and `children` props.
+
+## 5. Connect the buttons
+
+In `src/routes/index.tsx`, read the user and actions from `useAuth()`. The hook handles navigation to the provider for both sign-in and sign-out. [Example home page](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/index.tsx)
 
 ```tsx
 import { displayName } from '@lpshanley/oidc-start-react'
-import { getAuth, getSignInUrl, signOut } from '@lpshanley/oidc-start-react/functions'
+import { useAuth } from '@lpshanley/oidc-start-react/client'
 import { createFileRoute } from '@tanstack/react-router'
-import { useServerFn } from '@tanstack/react-start'
 
-export const Route = createFileRoute('/')({
-  loader: () => getAuth(),
-  component: Home,
-})
+export const Route = createFileRoute('/')({ component: Home })
 
 function Home() {
-  const { user } = Route.useLoaderData()
-  const signOutAndRedirect = useServerFn(signOut)
-
-  if (!user) {
-    return <button onClick={async () => location.assign(await getSignInUrl())}>Sign in</button>
-  }
-
+  const { user, signIn, signOut } = useAuth()
+  if (!user) return <button onClick={() => signIn()}>Sign in</button>
   return (
     <main>
       <p>Signed in as {displayName(user)}.</p>
-      <button onClick={() => signOutAndRedirect()}>Sign out</button>
+      <button onClick={signOut}>Sign out</button>
     </main>
   )
 }
 ```
 
-For shared UI such as an account menu, load `getAuth()` in the root route and wrap `<Outlet />` in `<OidcAuthProvider auth={Route.useLoaderData()}>`. Import the provider and `useAuth` from `@lpshanley/oidc-start-react/client`. Components can then call `const { user, signIn, signOut } = useAuth()` and bind buttons with `onClick={() => signIn()}` or `onClick={() => signOut()}`. The first render uses the loader's user, and subsequent loader updates flow through the provider. [Example root route](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/__root.tsx)
+Call `signOut()` for the current session or `signOut({ everywhere: true })` for all of this user's sessions in this app. Both use the same CSRF-protected POST server function. If the revocation store is unavailable, the server returns 503 so the user can retry.
+
+Use `useAuth().hasRole('admin')` to show role-specific UI. It returns false for signed-out users and sessions without a roles claim. Check authorization again in the server handler that reads private data or performs the action.
+
+Import `useUser` from `@lpshanley/oidc-start-react/client` when a component only needs the loader's `AuthUser | null`.
+
+For navigation links, import `SignedIn` and `SignedOut` from that same entry. Inside the provider, `<SignedIn><AccountMenu /></SignedIn>` shows the menu to a signed-in user and `<SignedOut><SignInButton /></SignedOut>` shows a button to a guest. Both use the loader's user during SSR and client navigation.
 
 **Try it.** Open `/` in a fresh browser session and choose **Sign in**. After the provider redirects you back, your name should appear and survive a reload. Choose **Sign out**, finish logout at the provider if prompted, and reload. You should see **Sign in** again.
 
-To return someone to a specific page, pass a local path when starting sign-in, for example `getSignInUrl({ data: { returnPathname: '/account' } })`.
+### Recheck the session when a tab regains focus
+
+To pick up a sign-out from another tab, add this effect to the root component that reads the auth loader. Invalidating the root match reruns `getAuth()` and supplies the new user to the provider. The server function returns only `{ user }` and sets `Cache-Control: no-store`.
+
+```tsx
+import { rootRouteId, useRouter } from '@tanstack/react-router'
+import { useEffect } from 'react'
+
+function useRecheckAuthOnFocus() {
+  const router = useRouter()
+  useEffect(() => {
+    const recheck = () => {
+      void router.invalidate({ filter: match => match.routeId === rootRouteId })
+    }
+    window.addEventListener('focus', recheck)
+    return () => window.removeEventListener('focus', recheck)
+  }, [router])
+}
+```
+
+Call `useRecheckAuthOnFocus()` once in the root component to opt in. A session check can update the idle timestamp, so a periodic timer in an unattended tab can extend its session.
+
+### Sign in and return here
+
+From a page with a sign-in button, pass its local pathname when the user clicks. The server sanitizes the path and binds it to this sign-in flow. Omitting the option keeps the default destination of `/`.
+
+```tsx
+function SignInHere() {
+  const { signIn } = useAuth()
+  return <button onClick={() => signIn({ returnPathname: window.location.pathname })}>Sign in</button>
+}
+```
+
+If the page needs its current filters or anchor after sign-in, append `window.location.search` or `window.location.hash` to the pathname. From a dedicated login page, pass the intended destination instead. The server function accepts the same option, for example `getSignInUrl({ data: { returnPathname: '/account' } })`.
 
 To prefill an account, pass `loginHint`. For an account picker, call `signIn({ prompt: 'select_account' })`. The hook, `getSignInUrl({ data: options })`, and `handleSignInRoute(options)` accept the same sign-in options. Supported prompts are `login`, `consent`, `select_account`, and `none`. Omitting `prompt` leaves the provider's usual SSO behavior in place.
 
 ## HTTP routes and server access
 
-The buttons above use server functions. If you prefer ordinary links and forms, mount these handlers from `@lpshanley/oidc-start-react` behind the same OIDC middleware. Choose the paths in your app.
+The buttons above call server functions through `useAuth()`. To call those functions directly, import `getSignInUrl` and `signOut` from `@lpshanley/oidc-start-react/functions`. Bind the latter with `useServerFn(signOut)` in a component so the router follows the sign-out redirect. For ordinary links and forms, mount these handlers from `@lpshanley/oidc-start-react` behind the same OIDC middleware. Choose the paths in your app.
 
 | Method | Handler | When to use it |
 | --- | --- | --- |
-| GET | `handleSignInRoute()` | Link to sign-in. The optional `returnPathname` query parameter selects a local return path. |
+| GET | `handleSignInRoute()` | Link to sign-in. Use `returnPathname` for the local return path and `maxAge` to request a recent provider login. |
 | GET | `handleCallbackRoute()` | Mount at the exact callback path registered with your provider. |
-| POST | `handleSignOutRoute()` | Submit a same-origin form. Add `server.middleware: [createCsrfMiddleware()]` to this route because the global filter above only covers server functions. |
+| POST | `handleSignOutRoute()` | Submit a same-origin form. Include the field `everywhere=1` to revoke all of the user's app sessions. Add `server.middleware: [createCsrfMiddleware()]` to this route because the global filter above only covers server functions. |
 | POST | `handleBackchannelLogoutRoute()` | Register this URL with your provider for back-channel logout. The provider sends a signed logout token without a browser Origin header. Keep the browser CSRF check scoped to the browser routes. |
 
 In a server handler, import `getOidcContext` from `@lpshanley/oidc-start-react/server` to access the resolved session and core for the current request. Use `getAuth()` from `/functions` when a loader or component only needs the user.
+
+### Protect route navigation
+
+Mount `GET: handleSignInRoute()` at a local path such as `/sign-in`. A protected route can then use the following option with `requireAuth` from `@lpshanley/oidc-start-react/functions`.
+
+```ts
+beforeLoad: ({ location }) => requireAuth({ signInPath: '/sign-in', returnPathname: location.href })
+```
+
+The helper reads the session on the server. A guest follows a document redirect to the sign-in route. A signed-in user is available as `Route.useRouteContext().user`. Enforce authorization in every server function or endpoint that serves private data, including those called by the guarded route.
 
 ### Customize callback failures
 
 Pass `onError({ reason, request })` to `handleCallbackRoute` to return a custom response. It takes precedence over `errorRedirectUrl`. A provider cancellation is `access_denied`, and a missing verifier (for example after its cookie expires) is `sign_in_expired`. Other reasons are `invalid_callback`, `invalid_state`, `provider_error`, `token_exchange_failed`, and `session_failed`. The middleware still clears the failed flow's verifier. A rejection by your own `allowSession` policy takes its separate 403 path.
 
+To show a message on your own login page, redirect the classified reason to a fixed local route.
+
+```ts
+GET: handleCallbackRoute({
+  onError: ({ reason }) => new Response(null, {
+    status: 303,
+    headers: {
+      Location: '/login?' + new URLSearchParams({ auth_error: reason }),
+      'Cache-Control': 'no-store',
+    },
+  }),
+})
+```
+
+On that page, import `authErrorMessage` from `@lpshanley/oidc-start-react`. Read `auth_error` from the route's search parameters and render `<p role="alert">{authErrorMessage(auth_error)}</p>` when the parameter is present. The helper selects fixed messages and gives unknown values a generic retry message. Host access denials keep their 403 response.
+
 ### Require a recent login
+
+Use `requireRecentAuth` from `@lpshanley/oidc-start-react/functions` in `beforeLoad` for a page that requires a recent provider login.
+
+```ts
+beforeLoad: ({ location }) => requireRecentAuth({
+  maxAge: 300, signInPath: '/sign-in', returnPathname: location.href,
+})
+```
+
+A guest or stale session is sent to the local sign-in endpoint with the same `maxAge` in seconds. A `maxAge` configured on `handleSignInRoute` caps the value the URL can request. Choose a positive window that gives the user time to return from the provider.
 
 Inside the server handler for a sensitive action, call `checkRecentAuth({ maxAge: 300 })` from `@lpshanley/oidc-start-react/server` before performing the action. If `isStale` is true, stop the mutation and offer `signIn({ maxAge: 300, returnPathname: '/settings' })`. Check again when the user submits the action after returning. Pick the maximum age in the server's policy.
 

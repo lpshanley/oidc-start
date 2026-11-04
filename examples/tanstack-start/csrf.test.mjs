@@ -17,3 +17,24 @@ test("lets the provider redirect reach the callback without an Origin header", a
 	assert.equal(response.status, 400);
 	assert.match(await response.text(), /Restart sign-in/);
 });
+
+test("protected navigation redirects a guest locally without starting a provider flow", async () => {
+	const request = new Request("https://app.example.test/account?tab=profile");
+	const response = await app.fetch(request);
+	assert.ok(response.status >= 300 && response.status < 400);
+	const location = new URL(response.headers.get("location"), request.url);
+	assert.equal(location.origin + location.pathname, "https://app.example.test/sign-in");
+	assert.equal(location.searchParams.get("returnPathname"), "/account?tab=profile");
+	assert.deepEqual(response.headers.getSetCookie(), []);
+});
+
+test("the recent-auth guard carries the requested login age into sign-in", async () => {
+	const request = new Request("https://app.example.test/settings");
+	const response = await app.fetch(request);
+	assert.ok(response.status >= 300 && response.status < 400);
+	const location = new URL(response.headers.get("location"), request.url);
+	assert.equal(location.pathname, "/sign-in");
+	assert.equal(location.searchParams.get("maxAge"), "300");
+	assert.equal(location.searchParams.get("returnPathname"), "/settings");
+	assert.deepEqual(response.headers.getSetCookie(), []);
+});
