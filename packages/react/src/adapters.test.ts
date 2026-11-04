@@ -162,13 +162,13 @@ describe("route handlers", () => {
 
 		const response = await routes.signInRoute(
 			new Request("https://sage.test/api/auth/sign-in?returnPathname=%2Fp"),
-			{},
+			{ prompt: "select_account" },
 		);
 
 		expect(core.signIn).toHaveBeenCalledWith(
 			expect.any(Request),
 			expect.any(Map),
-			"/p",
+			{ returnPathname: "/p", prompt: "select_account" },
 			{ correlationId: "req-1" },
 		);
 		expect(response.status).toBe(307);

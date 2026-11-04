@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+/** Options for a single authorization request. Omit prompt to allow provider SSO. */
+export const signInOptionsSchema = z.object({
+	returnPathname: z.string().optional(),
+	loginHint: z.string().min(1).optional(),
+	prompt: z.enum(["none", "login", "consent", "select_account"]).optional(),
+});
+export type SignInOptions = z.infer<typeof signInOptionsSchema>;
+
 export const authUserSchema = z.object({
 	sub: z.string().min(1),
 	email: z.string().min(1),

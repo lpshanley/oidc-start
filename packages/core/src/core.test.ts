@@ -96,6 +96,19 @@ beforeEach(() => {
 });
 
 describe("OIDC core", () => {
+	test("scopes login hints and prompts to one sign-in", async () => {
+		const auth = core();
+		const start = await auth.signIn(request("/"), new Map(), { loginHint: "alice+work@sage.test", prompt: "select_account" });
+		const params = new URL(start.url).searchParams;
+		expect(params.get("login_hint")).toBe("alice+work@sage.test");
+		expect(params.get("prompt")).toBe("select_account");
+
+		const ordinary = await auth.signIn(request("/"), new Map(), "/dashboard");
+		const defaults = new URL(ordinary.url).searchParams;
+		expect(defaults.has("login_hint")).toBe(false);
+		expect(defaults.has("prompt")).toBe(false);
+	});
+
 	test("signs in, completes the callback, resolves the user, and signs out", async () => {
 		const auth = core();
 		const jar = new Map<string, string>();

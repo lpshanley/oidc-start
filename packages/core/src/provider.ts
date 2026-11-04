@@ -3,7 +3,7 @@ import { createRemoteJWKSet, jwtVerify, customFetch as jwksFetch } from "jose";
 import * as client from "openid-client";
 import type { OidcCallContext, OidcConfiguration } from "./config.js";
 import { LOGOUT_TOKEN_MAX_AGE_SECONDS, LogoutTokenError, logoutTarget } from "./logout-token.js";
-import type { AuthUser } from "./models.js";
+import type { AuthUser, SignInOptions } from "./models.js";
 
 // OpenID Connect operations over openid-client, standing in for the WorkOS
 // user-management calls in authkit-session (authorization URL, code exchange,
@@ -179,6 +179,8 @@ export function createProvider(
 
 	const api = {
 		async authorizationUrl({
+			loginHint,
+			prompt,
 			redirectUri,
 			state,
 			nonce,
@@ -188,10 +190,12 @@ export function createProvider(
 			state: string;
 			nonce: string;
 			codeVerifier: string;
-		}) {
+		} & Pick<SignInOptions, "loginHint" | "prompt">) {
 			return client.buildAuthorizationUrl(await discover(), {
 				redirect_uri: redirectUri,
 				scope: settings.OIDC_SCOPES,
+				...(loginHint && { login_hint: loginHint }),
+				...(prompt && { prompt }),
 				state,
 				nonce,
 				code_challenge: await client.calculatePKCECodeChallenge(codeVerifier),

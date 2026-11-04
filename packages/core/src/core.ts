@@ -16,7 +16,7 @@ import {
 	serializeCookie,
 } from "./cookies.js";
 import { LOGOUT_TOKEN_MAX_AGE_SECONDS, type LogoutTarget, LogoutTokenError } from "./logout-token.js";
-import { type AuthUser, sanitizeReturnPath } from "./models.js";
+import { type AuthUser, sanitizeReturnPath, type SignInOptions, signInOptionsSchema } from "./models.js";
 import {
 	authorizationErrorCode,
 	createProvider,
@@ -185,7 +185,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		purpose: FlowPurpose,
 		request: Request,
 		cookies: Map<string, string>,
-		returnPathname: string | null | undefined,
+		options: SignInOptions,
 		context: OidcCallContext | undefined,
 	) {
 		const nonce = randomNonce();
@@ -195,7 +195,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				purpose,
 				nonce,
 				codeVerifier,
-				returnPathname: sanitizeReturnPath(returnPathname),
+				returnPathname: sanitizeReturnPath(options.returnPathname),
 			},
 			password(),
 		);
@@ -204,6 +204,8 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			provider().authorizationUrl(
 				{
 					redirectUri: callbackUri(purpose, request),
+					loginHint: options.loginHint,
+					prompt: options.prompt,
 					state,
 					nonce,
 					codeVerifier,
@@ -305,10 +307,13 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		signIn(
 			request: Request,
 			cookies: Map<string, string>,
-			returnPathname?: string | null,
+			options?: string | null | SignInOptions,
 			context?: OidcCallContext,
 		) {
-			return begin("session", request, cookies, returnPathname, context);
+			const signInOptions = typeof options === "string"
+				? { returnPathname: options }
+				: signInOptionsSchema.parse(options ?? {});
+			return begin("session", request, cookies, signInOptions, context);
 		},
 
 		/** Verifies the flow, exchanges the code, and issues the session. */
@@ -355,7 +360,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			returnPathname: string,
 			context?: OidcCallContext,
 		) {
-			return begin("grant", request, cookies, returnPathname, context);
+			return begin("grant", request, cookies, { returnPathname }, context);
 		},
 
 		/** Verifies a grant's callback and exchanges its code for tokens. */

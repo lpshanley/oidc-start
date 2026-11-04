@@ -2,19 +2,19 @@ import { redirect } from "@tanstack/react-router";
 import { setResponseHeader } from "@tanstack/react-start/server";
 import { endSession } from "./sign-out.server.js";
 import { getOidcContext } from "./context.js";
-import type { AuthSession } from "@lpshanley/oidc-start-core/models";
+import type { AuthSession, SignInOptions } from "@lpshanley/oidc-start-core/models";
 
 export function getAuthBody(): AuthSession {
 	setResponseHeader("Cache-Control", "no-store");
 	return { user: getOidcContext().auth().user };
 }
 
-export async function getSignInUrlBody(returnPathname?: string) {
+export async function getSignInUrlBody(options?: SignInOptions) {
 	const context = getOidcContext();
 	const { url, setCookies } = await context.core.signIn(
 		context.request,
 		context.cookies,
-		returnPathname,
+		options,
 		context.call,
 	);
 	for (const line of setCookies) context.appendSetCookie(line);

@@ -102,6 +102,8 @@ For shared UI such as an account menu, load `getAuth()` in the root route and wr
 
 To return someone to a specific page, pass a local path when starting sign-in, for example `getSignInUrl({ data: { returnPathname: '/account' } })`.
 
+To prefill an account, pass `loginHint`. For an account picker, call `signIn({ prompt: 'select_account' })`. The hook, `getSignInUrl({ data: options })`, and `handleSignInRoute(options)` accept the same sign-in options. Supported prompts are `login`, `consent`, `select_account`, and `none`. Omitting `prompt` leaves the provider's usual SSO behavior in place.
+
 ## HTTP routes and server access
 
 The buttons above use server functions. If you prefer ordinary links and forms, mount these handlers from `@lpshanley/oidc-start-react` behind the same OIDC middleware. Choose the paths in your app.

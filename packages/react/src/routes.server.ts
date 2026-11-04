@@ -2,14 +2,18 @@ import { endSession } from "./sign-out.server.js";
 import { getOidcContext } from "./context.js";
 import type { CallbackErrorReason } from "@lpshanley/oidc-start-core";
 
-export type SignInRouteOptions = {
+import type { SignInOptions } from "@lpshanley/oidc-start-core/models";
+
+type FailureOptions = {
 	/** Where to send the browser when sign-in fails. Defaults to a 400. */
 	errorRedirectUrl?: string;
 	/** Shown when the host denies a session to an authenticated user. */
 	accessDeniedMessage?: string;
 };
 
-export type CallbackRouteOptions = SignInRouteOptions & {
+export type SignInRouteOptions = FailureOptions & SignInOptions;
+
+export type CallbackRouteOptions = FailureOptions & {
 	/** Customize callback failures after the verifier cookie has been queued for cleanup. */
 	onError?: (failure: { reason: CallbackErrorReason; request: Request }) => Response | Promise<Response>;
 };
@@ -23,7 +27,7 @@ function redirectTo(location: string, status: number) {
 
 function failure(
 	request: Request,
-	options: SignInRouteOptions,
+	options: FailureOptions,
 ) {
 	if (options.errorRedirectUrl) {
 		return redirectTo(
@@ -46,7 +50,11 @@ export async function signInRoute(
 		const { url, setCookies } = await context.core.signIn(
 			request,
 			context.cookies,
-			new URL(request.url).searchParams.get("returnPathname"),
+			{
+				returnPathname: new URL(request.url).searchParams.get("returnPathname") ?? options.returnPathname,
+				loginHint: options.loginHint,
+				prompt: options.prompt,
+			},
 			context.call,
 		);
 		for (const line of setCookies) context.appendSetCookie(line);
