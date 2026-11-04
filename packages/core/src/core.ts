@@ -196,6 +196,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				nonce,
 				codeVerifier,
 				returnPathname: sanitizeReturnPath(options.returnPathname),
+				maxAge: options.maxAge,
 			},
 			password(),
 		);
@@ -205,6 +206,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				{
 					redirectUri: callbackUri(purpose, request),
 					loginHint: options.loginHint,
+					maxAge: options.maxAge,
 					prompt: options.prompt,
 					state,
 					nonce,
@@ -257,19 +259,20 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			// in front of the app doesn't change the URL being verified.
 			const callbackUrl = new URL(callbackUri(purpose, request));
 			callbackUrl.search = url.search;
-			const { user, tokens, idpSid } = await withinDeadline(
+			const { user, tokens, idpSid, authTime } = await withinDeadline(
 				provider().exchangeCode(
 					callbackUrl,
 					{
 						state,
 						nonce: flow.nonce,
 						codeVerifier: flow.codeVerifier,
+						maxAge: flow.maxAge,
 					},
 					context,
 				),
 				context,
 			);
-			return { ok: true as const, flow, user, tokens, idpSid, clearVerifier };
+			return { ok: true as const, flow, user, tokens, idpSid, authTime, clearVerifier };
 		} catch (error) {
 			const code = authorizationErrorCode(error);
 			if (code) reason = code === "access_denied" ? "access_denied" : "provider_error";
@@ -324,7 +327,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		): Promise<CallbackResult> {
 			const result = await complete("session", request, cookies, context);
 			if (!result.ok) return result;
-			const { user, tokens, idpSid, flow, clearVerifier } = result;
+			const { user, tokens, idpSid, authTime, flow, clearVerifier } = result;
 			try {
 				if (!options.allowSession(user)) throw new SessionAccessDeniedError();
 				const now = Math.floor(Date.now() / 1000);
@@ -337,6 +340,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 							...tokens,
 							sid: crypto.randomUUID(),
 							...(idpSid ? { idpSid } : {}),
+							authTime,
 							issuedAt: now,
 							lastSeenAt: now,
 						})),

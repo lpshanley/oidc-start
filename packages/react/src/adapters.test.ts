@@ -283,6 +283,22 @@ test("both sign-out entry points return 503 and preserve cookies when revocation
 	expect(appended).toEqual([]);
 });
 
+test("recent auth uses the provider login time, including the boundary, and fails closed", async () => {
+	const { checkRecentAuth } = await import("./server.js");
+	vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+	try {
+		context();
+		expect(checkRecentAuth({ maxAge: 300 }).isStale).toBe(true);
+		for (const [authTime, expected] of [[undefined, true], [699, true], [700, false], [1000, false], [1001, true]] as const) {
+			context({ session: { issuedAt: 1000, authTime } as OidcContext["session"] });
+			expect(checkRecentAuth({ maxAge: 300 }).isStale).toBe(expected);
+		}
+		expect(() => checkRecentAuth({ maxAge: NaN })).toThrow(RangeError);
+	} finally {
+		vi.restoreAllMocks();
+	}
+});
+
 describe("server function bodies", () => {
 	test("getAuth returns only the user and is not cached", () => {
 		context({ auth: () => ({ user: alice }) });

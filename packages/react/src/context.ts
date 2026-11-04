@@ -35,3 +35,14 @@ export function getOidcContext(): OidcContext {
 	if (!isOidcContext(context?.oidc)) throw new Error(NOT_CONFIGURED);
 	return context.oidc;
 }
+
+/** Check the resolved session inside the server handler that performs a sensitive action. */
+export function checkRecentAuth({ maxAge }: { maxAge: number }): { isStale: boolean } {
+	if (!Number.isSafeInteger(maxAge) || maxAge < 0) {
+		throw new RangeError("maxAge must be a nonnegative integer in seconds");
+	}
+	const authTime = getOidcContext().session?.authTime;
+	if (authTime === undefined) return { isStale: true };
+	const age = Math.floor(Date.now() / 1000) - authTime;
+	return { isStale: !(age >= 0 && age <= maxAge) };
+}

@@ -22,6 +22,7 @@ const flowStateSchema = z.object({
 	nonce: z.string().min(1),
 	codeVerifier: z.string().min(1),
 	returnPathname: z.string(),
+	maxAge: z.number().int().nonnegative().optional(),
 	issuedAt: z.number(),
 });
 export type FlowState = z.infer<typeof flowStateSchema>;

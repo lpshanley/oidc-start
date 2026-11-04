@@ -179,6 +179,7 @@ export function createProvider(
 
 	const api = {
 		async authorizationUrl({
+			maxAge,
 			loginHint,
 			prompt,
 			redirectUri,
@@ -190,12 +191,13 @@ export function createProvider(
 			state: string;
 			nonce: string;
 			codeVerifier: string;
-		} & Pick<SignInOptions, "loginHint" | "prompt">) {
+		} & Pick<SignInOptions, "loginHint" | "prompt" | "maxAge">) {
 			return client.buildAuthorizationUrl(await discover(), {
 				redirect_uri: redirectUri,
 				scope: settings.OIDC_SCOPES,
 				...(loginHint && { login_hint: loginHint }),
 				...(prompt && { prompt }),
+				...(maxAge !== undefined && { max_age: String(maxAge) }),
 				state,
 				nonce,
 				code_challenge: await client.calculatePKCECodeChallenge(codeVerifier),
@@ -205,8 +207,8 @@ export function createProvider(
 
 		async exchangeCode(
 			callbackUrl: URL,
-			checks: { state: string; nonce: string; codeVerifier: string },
-		): Promise<{ user: AuthUser; tokens: TokenSet; idpSid?: string }> {
+			checks: { state: string; nonce: string; codeVerifier: string; maxAge?: number },
+		): Promise<{ user: AuthUser; tokens: TokenSet; idpSid?: string; authTime?: number }> {
 			const config = await discover();
 			const response = await client.authorizationCodeGrant(
 				config,
@@ -215,11 +217,17 @@ export function createProvider(
 					pkceCodeVerifier: checks.codeVerifier,
 					expectedState: checks.state,
 					expectedNonce: checks.nonce,
+					maxAge: checks.maxAge,
 					idTokenExpected: true,
 				},
 			);
 			const claims = response.claims();
 			if (!claims?.sub) throw new Error("ID token has no subject");
+			// openid-client validates the requested age. A future authentication time
+			// must never become evidence of a recent login as the local clock advances.
+			const authTime = claims.auth_time;
+			const inFuture = authTime !== undefined && authTime > Math.floor(Date.now() / 1000);
+			if (inFuture && checks.maxAge !== undefined) throw new Error("ID token authentication time is in the future");
 			let email = firstString(claims.email);
 			const tokenRoles = roleList(claims[settings.OIDC_ROLES_CLAIM]);
 			let info: client.UserInfoResponse | undefined;
@@ -249,6 +257,7 @@ export function createProvider(
 						tokenRoles ?? roleList(info?.[settings.OIDC_ROLES_CLAIM]) ?? [],
 				},
 				tokens: tokenSet(response),
+				authTime: inFuture ? undefined : authTime,
 				// The provider's session id, matched by back-channel logout tokens.
 				idpSid: firstString(claims.sid) ?? undefined,
 			};

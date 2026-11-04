@@ -90,7 +90,7 @@ describe("session manager", () => {
 
 	test("refreshes near expiry once for concurrent requests and keeps the ID token", async () => {
 		const { manager, refresh } = setup();
-		const jar = await jarWith({ ...fresh, expiresAt: 1_000 + 10 });
+		const jar = await jarWith({ ...fresh, authTime: 600, expiresAt: 1_000 + 10 });
 		refresh.mockResolvedValue({
 			roles: ["stellar"],
 			accessToken: "access-2",
@@ -107,6 +107,7 @@ describe("session manager", () => {
 		expect(refresh).toHaveBeenCalledWith("refresh", "alice", undefined);
 		expect(first.session).toEqual({
 			...fresh,
+			authTime: 600,
 			user: { ...user, roles: ["stellar"] },
 			lastSeenAt: 1_000,
 			accessToken: "access-2",

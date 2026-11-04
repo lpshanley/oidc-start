@@ -53,6 +53,7 @@ export async function signInRoute(
 			{
 				returnPathname: new URL(request.url).searchParams.get("returnPathname") ?? options.returnPathname,
 				loginHint: options.loginHint,
+				maxAge: options.maxAge,
 				prompt: options.prompt,
 			},
 			context.call,
