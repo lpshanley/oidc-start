@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+
+catalogMode: prefer
+catalog:
+  'turbo': '2.11.10'
+
+allowBuilds:
+  esbuild: true

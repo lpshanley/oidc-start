@@ -1,0 +1,15 @@
+{
+  "name": "oidc-start-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "verify": "turbo run typecheck test check-package"
+  },
+  "devDependencies": {
+    "turbo": "catalog:"
+  }
+}
