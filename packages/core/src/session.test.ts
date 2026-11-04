@@ -190,6 +190,20 @@ describe("session manager", () => {
 describe("session lifetime and revocation", () => {
 	const at = (seconds: number) => vi.setSystemTime(seconds * 1000);
 
+	test("passes only session identifiers and issue time to the revocation store", async () => {
+		const { manager } = setup();
+		const jar = await jarWith({ ...fresh, idpSid: "provider-session" });
+
+		await manager.resolve(jar);
+
+		expect(revocations.isRevoked.mock.lastCall).toStrictEqual([{
+			sid: fresh.sid,
+			sub: user.sub,
+			issuedAt: fresh.issuedAt,
+			idpSid: "provider-session",
+		}]);
+	});
+
 	test("clears an idle session while its access token is still valid", async () => {
 		const { manager, refresh } = setup();
 		const idleLimit = 12 * 60 * 60;

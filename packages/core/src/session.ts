@@ -148,7 +148,13 @@ export function createSessionManager({
 			return { session: null, setCookies: clear(cookies) };
 		}
 		try {
-			if (await revocations.isRevoked({ ...session, sub: session.user.sub })) {
+			const revoked = await revocations.isRevoked({
+				sid: session.sid,
+				sub: session.user.sub,
+				issuedAt: session.issuedAt,
+				...(session.idpSid !== undefined && { idpSid: session.idpSid }),
+			});
+			if (revoked) {
 				return { session: null, setCookies: clear(cookies) };
 			}
 		} catch (error) {
