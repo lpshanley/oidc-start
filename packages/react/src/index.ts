@@ -1,3 +1,4 @@
+export * from "@lpshanley/oidc-start-core/models";
 export type {
 	OidcCallContext,
 	OidcErrorEvent,

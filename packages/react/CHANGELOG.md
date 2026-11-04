@@ -1,5 +1,15 @@
 # @lpshanley/oidc-start-react
 
+## 0.2.0
+
+### Minor Changes
+
+- 4879221: Install just the React adapter in TanStack Start apps. Import browser-safe user models and helpers from the package root, and import `createOidcCore` and the session storage types from `@lpshanley/oidc-start-react/server`.
+
+### Patch Changes
+
+- @lpshanley/oidc-start-core@0.2.0
+
 ## 0.1.0
 
 First stable release of the TanStack Start adapter. It depends on `@lpshanley/oidc-start-core@0.1.0`, including its revocation and UserInfo fixes. The npm package declares MIT and includes the license text.

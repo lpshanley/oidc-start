@@ -1,4 +1,4 @@
-import { displayName } from "@lpshanley/oidc-start-core/models";
+import { displayName } from "@lpshanley/oidc-start-react";
 import { getAuth, getSignInUrl, signOut } from "@lpshanley/oidc-start-react/functions";
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";

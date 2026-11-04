@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { createOidcCore } from "@lpshanley/oidc-start-core";
-import { hasRole } from "@lpshanley/oidc-start-core/models";
-import { oidcMiddleware, handleCallbackRoute } from "@lpshanley/oidc-start-react";
+import { handleCallbackRoute, hasRole, oidcMiddleware } from "@lpshanley/oidc-start-react";
+import { createOidcCore } from "@lpshanley/oidc-start-react/server";
 
 const core = createOidcCore({
 	environment: () => ({

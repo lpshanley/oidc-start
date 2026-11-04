@@ -1,4 +1,4 @@
-import { createOidcCore, type SessionRevocations } from "@lpshanley/oidc-start-core";
+import { createOidcCore, type SessionRevocations } from "@lpshanley/oidc-start-react/server";
 
 // Single-process example. A deployed host needs a shared, persistent store.
 const sessions = new Map<string, number>();
