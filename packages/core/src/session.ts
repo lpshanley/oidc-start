@@ -7,7 +7,8 @@ import {
 	writeChunked,
 } from "./cookies.js";
 import { authUserSchema } from "./models.js";
-import type { OidcProvider, RefreshedTokens } from "./provider.js";
+import { OidcDeadlineError, withinDeadline } from "./deadline.js";
+import { type OidcProvider, RefreshNotDispatched, type RefreshedTokens } from "./provider.js";
 import { RECENT_REFRESH_MS, sharedRefresh, type SessionRefreshCoordinator } from "./refresh.js";
 import type { SessionRevocations } from "./revocation.js";
 import { sealValue, unsealValue } from "./seal.js";
@@ -130,10 +131,11 @@ export function createSessionManager({
 		return (await allowSession(user)) === true;
 	}
 
-	// Verify the cookie, host policy, lifetimes, and revocation before using it.
-	// A store read failure propagates so sign-out can be retried.
-	async function readActive(
+	// An idle or policy-denied copy can still identify its own session for
+	// revocation. Only access checks may authorize using that session.
+	async function readSession(
 		cookies: Map<string, string>,
+		purpose: "access" | "sign-out",
 		onStoreError?: (error: unknown) => void,
 	): Promise<SessionResolution> {
 		const sealed = readChunked(cookies, name());
@@ -149,8 +151,7 @@ export function createSessionManager({
 		const now = Math.floor(Date.now() / 1000);
 		if (
 			now - session.issuedAt > maxAgeSeconds ||
-			now - session.lastSeenAt > idleSeconds ||
-			!(await isAllowed(session.user))
+			(purpose === "access" && (now - session.lastSeenAt > idleSeconds || !(await isAllowed(session.user))))
 		) {
 			return { session: null, setCookies: clear(cookies) };
 		}
@@ -175,10 +176,9 @@ export function createSessionManager({
 	async function resolve(
 		cookies: Map<string, string>,
 		onError: (error: unknown, operation: "refresh" | "revocation-read") => void = () => {},
-		bound: <T>(start: () => Promise<T>) => Promise<T> = (start) => start(),
 		context?: OidcCallContext,
 	): Promise<SessionResolution> {
-		const checked = await readActive(cookies, (error) => onError(error, "revocation-read"));
+		const checked = await readSession(cookies, "access", (error) => onError(error, "revocation-read"));
 		const { session } = checked;
 		if (!session) return checked;
 		const now = Math.floor(Date.now() / 1000);
@@ -194,22 +194,23 @@ export function createSessionManager({
 		}
 		try {
 			const refreshToken = session.refreshToken;
-			const refreshedTokens = await bound(() => refreshCoordinator
-				? sharedRefresh(refreshCoordinator, {
+			const refreshedTokens = await withinDeadline(() => {
+				if (!refreshCoordinator) return refreshOnce(refreshToken, session.user.sub, context);
+				return sharedRefresh(refreshCoordinator, {
 					session,
 					until: session.issuedAt + maxAgeSeconds,
 					password: password(),
 					refresh: () => provider().refresh(refreshToken, session.user.sub, context),
-				})
-				: refreshOnce(refreshToken, session.user.sub, context));
+				});
+			}, context);
 			if (!refreshedTokens) return { session: null, setCookies: [] };
-			const { roles, ...tokens } = refreshedTokens;
+			const { roles, email, ...tokens } = refreshedTokens;
 			const refreshed: Session = {
 				...session,
 				...tokens,
 				...(refreshCoordinator && { refreshGeneration: (session.refreshGeneration ?? 0) + 1 }),
 				idToken: tokens.idToken ?? session.idToken,
-				user: { ...session.user, roles },
+				user: { ...session.user, roles, email: email ?? session.user.email },
 				lastSeenAt: now,
 			};
 			if (!(await isAllowed(refreshed.user))) {
@@ -221,13 +222,13 @@ export function createSessionManager({
 			};
 		} catch (error) {
 			onError(error, "refresh");
-			// A peer may already have written the renewed cookie, even if this
-			// caller timed out. A failed coordinated refresh must never erase it.
-			return { session: null, setCookies: refreshCoordinator ? [] : clear(cookies) };
+			// A peer may already have renewed the cookie when this caller times out.
+			const preserveCookie = refreshCoordinator || error instanceof OidcDeadlineError || error instanceof RefreshNotDispatched;
+			return { session: null, setCookies: preserveCookie ? [] : clear(cookies) };
 		}
 	}
 
-	return { isAllowed, readActive, resolve, write, clear };
+	return { isAllowed, readSession, resolve, write, clear };
 }
 
 export type SessionManager = ReturnType<typeof createSessionManager>;

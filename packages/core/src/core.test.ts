@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { verifierCookieName } from "./state.js";
+import { OidcDeadlineError, withinDeadline } from "./deadline.js";
 
 const oidc = vi.hoisted(() => {
 	const metadata: Record<string, string> = {
@@ -45,9 +46,7 @@ vi.mock("openid-client", () => oidc);
 
 const {
 	createOidcCore,
-	OidcDeadlineError,
 	SessionAccessDeniedError,
-	withinDeadline,
 } = await import("./core.js");
 
 const env = {
@@ -465,11 +464,12 @@ test("ends the sessions a verified back-channel logout token names", async () =>
 	expect(revocations.revokeIdpSession).not.toHaveBeenCalled();
 });
 
-test.each(["sid", "sub"] as const)("redelivery preserves the original %s revocation after a storage outage", async (kind) => {
+test.each(["sid", "sub"] as const)("redelivery preserves the original %s revocation after key and storage outages", async (kind) => {
 	const { exportJWK, generateKeyPair, SignJWT } = await import("jose");
 	const { privateKey, publicKey } = await generateKeyPair("RS256");
 	const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256" };
-	vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [jwk] })));
+	vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [jwk] }))
+		.mockResolvedValueOnce(new Response(null, { status: 503 })));
 	Object.assign(oidc.metadata, {
 		issuer: env.OIDC_ISSUER,
 		jwks_uri: "https://idp.test/jwks/",
@@ -494,12 +494,18 @@ test.each(["sid", "sub"] as const)("redelivery preserves the original %s revocat
 		allowSession, revocations, environment: () => env, onError: vi.fn(),
 		sessionMaxAgeSeconds: 3600,
 	});
-	const deliver = () => auth.backchannelLogout(new Request("https://internal:3000/auth/backchannel-logout", {
+	const deliver = (logoutToken = token) => auth.backchannelLogout(new Request("https://internal:3000/auth/backchannel-logout", {
 		method: "POST",
-		body: new URLSearchParams({ logout_token: token }),
+		body: new URLSearchParams({ logout_token: logoutToken }),
 	}));
 
 	try {
+		expect(await deliver()).toEqual({ status: 503 });
+		expect(write).not.toHaveBeenCalled();
+		const [header, payload, signature] = token.split(".");
+		const badSignature = (signature.startsWith("A") ? "B" : "A") + signature.slice(1);
+		expect(await deliver(`${header}.${payload}.${badSignature}`)).toEqual({ status: 400 });
+		expect(write).not.toHaveBeenCalled();
 		expect(await deliver()).toEqual({ status: 503 });
 		expect(await deliver()).toEqual({ status: 200 });
 		vi.useFakeTimers({ toFake: ["Date"], now: (issuedAt + 120) * 1000 });
@@ -532,6 +538,48 @@ test.each([
 	await expect(
 		auth.signOut(request("/logout"), new Map(), session, undefined, everywhere),
 	).rejects.toBe(failure);
+});
+
+test("an idle cookie can revoke its still-active copy only for this sign-in", async () => {
+	const base = Date.now();
+	vi.useFakeTimers({ toFake: ["Date"], now: base });
+	const revoked = new Set<string>();
+	const revokeAllFor = vi.fn();
+	const auth = createOidcCore({
+		allowSession, environment: () => env, sessionIdleSeconds: 60, sessionMaxAgeSeconds: 120,
+		revocations: { ...revocations, revokeAllFor, isRevoked: async ({ sid }) => revoked.has(sid),
+			revoke: async (sid) => { revoked.add(sid); } },
+	});
+	try {
+		const owner = new Map<string, string>();
+		const start = await auth.signIn(request("/"), owner);
+		apply(owner, start.setCookies);
+		const state = new URL(start.url).searchParams.get("state");
+		const callback = await auth.callback(request(`/callback?code=c&state=${state}`, owner), owner);
+		expect(callback.ok).toBe(true);
+		apply(owner, callback.setCookies);
+		vi.setSystemTime(base + 40_000);
+		const copy = apply(new Map(owner), (await auth.resolve(request("/", owner))).setCookies);
+		vi.setSystemTime(base + 61_000);
+		const idle = await auth.resolve(request("/", owner));
+		expect(idle.session).toBeNull();
+		const active = await auth.resolve(request("/", copy));
+		expect(active.session?.user.sub).toBe("alice");
+		await expect(auth.signOut(request("/logout", owner), owner, idle.session, undefined, true))
+			.rejects.toThrow("active session");
+		expect(revokeAllFor).not.toHaveBeenCalled();
+		const out = await auth.signOut(request("/logout", owner), owner, idle.session);
+		expect(apply(owner, out.setCookies).size).toBe(0);
+		expect(revoked).toEqual(new Set([active.session!.sid]));
+		expect((await auth.resolve(request("/", copy))).session).toBeNull();
+
+		revoked.clear();
+		vi.setSystemTime(base + 121_000);
+		await auth.signOut(request("/logout", copy), copy, null);
+		expect(revoked.size).toBe(0);
+	} finally {
+		vi.useRealTimers();
+	}
 });
 
 test.each([false, true])("sign-out can be retried after a revocation read outage (everywhere=%s)", async (everywhere) => {

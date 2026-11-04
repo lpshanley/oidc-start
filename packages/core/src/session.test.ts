@@ -206,6 +206,21 @@ describe("session manager", () => {
 		expect(retried.session?.refreshToken).toBe("refresh");
 	});
 
+	test("a late request cannot delete a peer's successful refresh", async () => {
+		const { manager, refresh } = setup();
+		const jar = await jarWith({ ...fresh, expiresAt: 1010 });
+		refresh.mockResolvedValueOnce({ roles: ["stellar"], accessToken: "renewed", expiresAt: 2000 });
+		const [success, late] = await Promise.all([
+			manager.resolve(jar),
+			manager.resolve(jar, undefined, { deadline: Date.now() - 1 }),
+		]);
+		expect(refresh).toHaveBeenCalledOnce();
+		expect(late).toEqual({ session: null, setCookies: [] });
+		apply(jar, success.setCookies);
+		apply(jar, late.setCookies);
+		expect((await manager.resolve(jar)).session?.accessToken).toBe("renewed");
+	});
+
 	test.each([
 		["the refresh fails", true],
 		["there is no refresh token", false],
@@ -318,6 +333,19 @@ describe("session lifetime and revocation", () => {
 		const { manager, refresh } = setup(async (user) => user.roles?.includes("member") === true);
 		const jar = await jarWith({ ...fresh, user: { ...user, roles: ["member"] }, expiresAt: 1010 });
 		refresh.mockResolvedValueOnce({ accessToken: "next", expiresAt: 2000, roles: [] });
+		const result = await manager.resolve(jar);
+		expect(refresh).toHaveBeenCalledOnce();
+		expect(result.session).toBeNull();
+		expect(apply(jar, result.setCookies).size).toBe(0);
+	});
+
+	test.each([false, true])("rechecks the refreshed email (coordinated=%s)", async (coordinated) => {
+		const { manager, refresh } = setup(
+			(user) => user.email.endsWith("@sage.test"),
+			coordinated ? { run: (_request, produce) => produce() } : undefined,
+		);
+		refresh.mockResolvedValueOnce({ roles: [], email: "alice@other.test", accessToken: "next", expiresAt: 2000 });
+		const jar = await jarWith({ ...fresh, expiresAt: 1010 });
 		const result = await manager.resolve(jar);
 		expect(refresh).toHaveBeenCalledOnce();
 		expect(result.session).toBeNull();

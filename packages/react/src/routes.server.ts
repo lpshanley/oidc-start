@@ -86,6 +86,7 @@ export async function callbackRoute(
 		context.cookies,
 		context.call,
 	);
+	if (result.ok) context.discardSessionUpdates?.();
 	for (const line of result.setCookies) context.appendSetCookie(line);
 	if (result.ok) return redirectTo(result.location, 307);
 	if (result.reason === "session_access_denied") {

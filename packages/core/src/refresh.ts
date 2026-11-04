@@ -30,6 +30,7 @@ const refreshResult = z.object({
 		expiresAt: z.number(),
 		refreshExpiresAt: z.number().optional(),
 		roles: z.array(z.string()),
+		email: z.string().min(1).optional(),
 	}),
 });
 

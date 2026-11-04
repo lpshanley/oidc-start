@@ -314,21 +314,27 @@ describe("provider", () => {
 	});
 });
 
-test("re-reads roles on refresh, from the ID token or else userinfo", async () => {
+test("re-reads policy claims on refresh, from the ID token or subject-checked UserInfo", async () => {
 	oidc.refreshTokenGrant.mockResolvedValueOnce(
-		tokenResponse({ access_token: "a2" }, { sub: "alice", roles: ["stellar"] }),
+		tokenResponse({ access_token: "a2" }, { sub: "alice", roles: ["stellar"], email: "alice@new.test" }),
 	);
 	await expect(
 		createProvider(settings).refresh("r1", "alice"),
-	).resolves.toMatchObject({ roles: ["stellar"] });
+	).resolves.toMatchObject({ roles: ["stellar"], email: "alice@new.test" });
+	expect(oidc.fetchUserInfo).not.toHaveBeenCalled();
 
 	oidc.refreshTokenGrant.mockResolvedValueOnce(
-		tokenResponse({ access_token: "a3" }, undefined),
+		tokenResponse({ access_token: "a3" }, { sub: "alice", roles: [] }),
 	);
-	oidc.fetchUserInfo.mockResolvedValueOnce({ sub: "alice", roles: [] });
+	oidc.fetchUserInfo.mockResolvedValueOnce({ sub: "alice", email: "alice@other.test", roles: ["stale"] });
 	await expect(
 		createProvider(settings).refresh("r2", "alice"),
-	).resolves.toMatchObject({ roles: [] });
+	).resolves.toMatchObject({ roles: [], email: "alice@other.test" });
+	expect(oidc.fetchUserInfo).toHaveBeenCalledWith(expect.anything(), "a3", "alice");
+
+	oidc.refreshTokenGrant.mockResolvedValueOnce(tokenResponse({}, undefined));
+	oidc.fetchUserInfo.mockResolvedValueOnce({ sub: "alice", roles: ["member"] });
+	await expect(createProvider(settings).refresh("r3", "alice")).resolves.toMatchObject({ roles: ["member"] });
 });
 
 describe("back-channel logout tokens", () => {

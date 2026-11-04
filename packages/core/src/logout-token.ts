@@ -1,4 +1,4 @@
-import type { JWTPayload } from "jose";
+import { errors, type JWTPayload } from "jose";
 
 // OpenID Connect Back-Channel Logout 1.0, section 2.6: the checks that apply
 // after the signature, issuer, and audience have been verified.
@@ -11,6 +11,20 @@ export const BACKCHANNEL_LOGOUT_EVENT =
 /** The logout token is malformed or not one this app accepts. */
 export class LogoutTokenError extends Error {
 	override name = "LogoutTokenError";
+}
+
+/** Only reject the token when its contents, claims or signature fail validation. */
+export function isInvalidLogoutToken(error: unknown) {
+	return error instanceof LogoutTokenError
+		|| error instanceof errors.JWTInvalid
+		|| error instanceof errors.JWSInvalid
+		|| error instanceof errors.JWTClaimValidationFailed
+		|| error instanceof errors.JWTExpired
+		|| error instanceof errors.JOSEAlgNotAllowed
+		|| error instanceof errors.JOSENotSupported
+		|| error instanceof errors.JWKSNoMatchingKey
+		|| error instanceof errors.JWKSMultipleMatchingKeys
+		|| error instanceof errors.JWSSignatureVerificationFailed;
 }
 
 /** Which sign-ins a logout token ends: one provider session, or all of a user's. */

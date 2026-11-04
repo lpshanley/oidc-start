@@ -2,6 +2,9 @@ import { getOidcContext } from "./context.js";
 
 export async function endSession(everywhere = false): Promise<string | Response> {
 	const context = getOidcContext();
+	// A failed revocation must leave the incoming cookie available for retry.
+	// A successful sign-out supplies all deletions for that same incoming jar.
+	context.discardSessionUpdates?.();
 	let result;
 	try {
 		result = await context.core.signOut(

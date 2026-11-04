@@ -1,4 +1,4 @@
-import { errors } from "jose";
+import { withinDeadline } from "./deadline.js";
 import { randomNonce, randomPKCECodeVerifier, randomState } from "openid-client";
 import {
 	assertOidcConfigured,
@@ -15,7 +15,7 @@ import {
 	parseCookies,
 	serializeCookie,
 } from "./cookies.js";
-import { LOGOUT_TOKEN_MAX_AGE_SECONDS, type LogoutTarget, LogoutTokenError } from "./logout-token.js";
+import { isInvalidLogoutToken, LOGOUT_TOKEN_MAX_AGE_SECONDS, type LogoutTarget } from "./logout-token.js";
 import { type AuthUser, sanitizeReturnPath, type SignInOptions, signInOptionsSchema } from "./models.js";
 import {
 	authorizationErrorCode,
@@ -40,34 +40,6 @@ import {
 // authkit-session (core) from authkit-tanstack-react-start (adapter).
 
 export type OidcAuth = { user: AuthUser | null };
-
-/** The caller's deadline passed before the provider answered. */
-export class OidcDeadlineError extends Error {
-	override name = "OidcDeadlineError";
-	constructor() {
-		super("The request deadline passed before the provider answered");
-	}
-}
-
-/**
- * Settles with the work, or rejects once the caller's deadline passes. Each
- * provider request also has its own timeout, so abandoned work still ends.
- */
-export async function withinDeadline<T>(
-	start: () => Promise<T>,
-	context?: OidcCallContext,
-	now = Date.now(),
-): Promise<T> {
-	if (context?.deadline === undefined) return start();
-	const remaining = context.deadline - now;
-	if (remaining <= 0) throw new OidcDeadlineError();
-	const work = start();
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	const expired = new Promise<never>((_, reject) => {
-		timer = setTimeout(() => reject(new OidcDeadlineError()), remaining);
-	});
-	return Promise.race([work, expired]).finally(() => clearTimeout(timer));
-}
 
 /** The provider authenticated a user whom the host denied a session. */
 export class SessionAccessDeniedError extends Error {
@@ -303,7 +275,6 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			const { session, setCookies } = await sessions.resolve(
 				cookies,
 				(error, operation) => onError({ operation, error, context }),
-				(work) => withinDeadline(work, context),
 				context,
 			);
 			return { cookies, session, setCookies };
@@ -427,7 +398,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			// A failed revocation lookup is anonymous for ordinary requests. Before
 			// signing out, require a definitive result for any presented cookie.
 			if (!session) {
-				const checked = await sessions.readActive(cookies);
+				const checked = await sessions.readSession(cookies, "sign-out");
 				if (checked.session && everywhere) {
 					// Only a fully resolved session may revoke the user's other sessions.
 					throw new Error("Retry signing out everywhere with an active session");
@@ -501,11 +472,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				);
 			} catch (error) {
 				onError({ operation: "backchannel-logout", error, context });
-				const invalid =
-					error instanceof LogoutTokenError ||
-					(error instanceof errors.JOSEError &&
-						!(error instanceof errors.JWKSTimeout));
-				return { status: invalid ? 400 : 503 };
+				return { status: isInvalidLogoutToken(error) ? 400 : 503 };
 			}
 			// Retries must apply the original event, even after a new sign-in.
 			try {
