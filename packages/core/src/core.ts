@@ -18,6 +18,7 @@ import {
 import { LOGOUT_TOKEN_MAX_AGE_SECONDS, type LogoutTarget, LogoutTokenError } from "./logout-token.js";
 import { type AuthUser, sanitizeReturnPath } from "./models.js";
 import {
+	authorizationErrorCode,
 	createProvider,
 	type OidcProvider,
 	type TokenSet,
@@ -75,9 +76,18 @@ export class SessionAccessDeniedError extends Error {
 	}
 }
 
+export type CallbackErrorReason =
+	| "invalid_callback"
+	| "sign_in_expired"
+	| "invalid_state"
+	| "access_denied"
+	| "provider_error"
+	| "token_exchange_failed"
+	| "session_failed";
+
 export type CallbackResult =
 	| { ok: true; location: string; setCookies: string[] }
-	| { ok: false; error: unknown; setCookies: string[] };
+	| { ok: false; reason: CallbackErrorReason | "session_access_denied"; error: unknown; setCookies: string[] };
 
 export type GrantResult =
 	| {
@@ -87,7 +97,7 @@ export type GrantResult =
 			returnPathname: string;
 			setCookies: string[];
 	  }
-	| { ok: false; error: unknown; setCookies: string[] };
+	| { ok: false; reason: CallbackErrorReason; error: unknown; setCookies: string[] };
 
 export type GrantRefresh =
 	| { status: "refreshed"; tokens: TokenSet }
@@ -229,16 +239,18 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		const clearVerifier = state
 			? [expire(verifierCookieName(prefix(), state))]
 			: [];
+		if (!state || !(url.searchParams.get("code") || url.searchParams.get("error"))) {
+			return { ok: false, reason: "invalid_callback", error: new OidcStateError("missing"), setCookies: clearVerifier } as const;
+		}
+		let reason: CallbackErrorReason = "invalid_state";
 		try {
-			if (!state || !(url.searchParams.get("code") || url.searchParams.get("error"))) {
-				throw new OidcStateError("missing");
-			}
 			const flow = await verifyCallbackState({
 				state,
 				cookieValue: cookies.get(verifierCookieName(prefix(), state)),
 				password: password(),
 				purpose,
 			});
+			reason = "token_exchange_failed";
 			// Rebuild the callback on the registered redirect URI so a proxy
 			// in front of the app doesn't change the URL being verified.
 			const callbackUrl = new URL(callbackUri(purpose, request));
@@ -257,7 +269,10 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			);
 			return { ok: true as const, flow, user, tokens, idpSid, clearVerifier };
 		} catch (error) {
-			return { ok: false as const, error, setCookies: clearVerifier };
+			const code = authorizationErrorCode(error);
+			if (code) reason = code === "access_denied" ? "access_denied" : "provider_error";
+			else if (error instanceof OidcStateError && error.reason === "missing") reason = "sign_in_expired";
+			return { ok: false as const, reason, error, setCookies: clearVerifier };
 		}
 	}
 
@@ -324,7 +339,8 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 					],
 				};
 			} catch (error) {
-				return { ok: false, error, setCookies: clearVerifier };
+				const reason = error instanceof SessionAccessDeniedError ? "session_access_denied" : "session_failed";
+				return { ok: false, reason, error, setCookies: clearVerifier };
 			}
 		},
 

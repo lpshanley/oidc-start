@@ -82,11 +82,15 @@ export const PROVIDER_TIMEOUT_MS = 5_000;
 /** The provider has not received a token refresh request. */
 export class RefreshNotDispatched extends Error {}
 
-/** Whether the provider returned access_denied in its authorization response. */
-export function isAuthorizationDenied(error: unknown): boolean {
+/** OAuth error code from an authorization response, including across bundles. */
+export function authorizationErrorCode(error: unknown): string | undefined {
 	return typeof error === "object" && error !== null
 		&& "code" in error && error.code === "OAUTH_AUTHORIZATION_RESPONSE_ERROR"
-		&& "error" in error && error.error === "access_denied";
+		&& "error" in error && typeof error.error === "string" ? error.error : undefined;
+}
+
+export function isAuthorizationDenied(error: unknown): boolean {
+	return authorizationErrorCode(error) === "access_denied";
 }
 
 export function createProvider(

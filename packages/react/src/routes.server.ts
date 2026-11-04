@@ -1,12 +1,17 @@
 import { endSession } from "./sign-out.server.js";
 import { getOidcContext } from "./context.js";
-import { SessionAccessDeniedError } from "@lpshanley/oidc-start-core";
+import type { CallbackErrorReason } from "@lpshanley/oidc-start-core";
 
-export type CallbackRouteOptions = {
+export type SignInRouteOptions = {
 	/** Where to send the browser when sign-in fails. Defaults to a 400. */
 	errorRedirectUrl?: string;
 	/** Shown when the host denies a session to an authenticated user. */
 	accessDeniedMessage?: string;
+};
+
+export type CallbackRouteOptions = SignInRouteOptions & {
+	/** Customize callback failures after the verifier cookie has been queued for cleanup. */
+	onError?: (failure: { reason: CallbackErrorReason; request: Request }) => Response | Promise<Response>;
 };
 
 function redirectTo(location: string, status: number) {
@@ -18,13 +23,8 @@ function redirectTo(location: string, status: number) {
 
 function failure(
 	request: Request,
-	options: CallbackRouteOptions,
-	operation: "sign-in" | "callback",
-	error: unknown,
+	options: SignInRouteOptions,
 ) {
-	// Provider error details go to onError, never into the response.
-	const context = getOidcContext();
-	context.core.report({ operation, error, context: context.call });
 	if (options.errorRedirectUrl) {
 		return redirectTo(
 			new URL(options.errorRedirectUrl, request.url).toString(),
@@ -39,7 +39,7 @@ function failure(
 
 export async function signInRoute(
 	request: Request,
-	options: CallbackRouteOptions,
+	options: SignInRouteOptions,
 ) {
 	const context = getOidcContext();
 	try {
@@ -52,7 +52,8 @@ export async function signInRoute(
 		for (const line of setCookies) context.appendSetCookie(line);
 		return redirectTo(url, 307);
 	} catch (error) {
-		return failure(request, options, "sign-in", error);
+		context.core.report({ operation: "sign-in", error, context: context.call });
+		return failure(request, options);
 	}
 }
 
@@ -68,7 +69,7 @@ export async function callbackRoute(
 	);
 	for (const line of result.setCookies) context.appendSetCookie(line);
 	if (result.ok) return redirectTo(result.location, 307);
-	if (result.error instanceof SessionAccessDeniedError) {
+	if (result.reason === "session_access_denied") {
 		return new Response(
 			options.accessDeniedMessage ?? "Your account does not have access.",
 			{
@@ -77,7 +78,9 @@ export async function callbackRoute(
 			},
 		);
 	}
-	return failure(request, options, "callback", result.error);
+	context.core.report({ operation: "callback", error: result.error, context: context.call });
+	if (options.onError) return options.onError({ reason: result.reason, request });
+	return failure(request, options);
 }
 
 export async function signOutRoute(request: Request) {

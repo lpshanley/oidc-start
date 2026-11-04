@@ -34,17 +34,17 @@ test.each(["session", "grant"])("%s callback verifies browser state before retur
 	const verifier = parseCookies(start.setCookies[0].split(";")[0]);
 
 	const unbound = await finish(new Request(callback), new Map());
-	expect(unbound).toMatchObject({ ok: false, error: expect.any(OidcStateError) });
+	expect(unbound).toMatchObject({ ok: false, reason: "sign_in_expired", error: expect.any(OidcStateError) });
 
 	const denied = await finish(new Request(callback), verifier);
-	expect(denied.ok).toBe(false);
+	expect(denied).toMatchObject({ ok: false, reason: "access_denied" });
 	expect(!denied.ok && isAuthorizationDenied(denied.error)).toBe(true);
 	const [verifierName] = verifier.keys();
 	expect(denied.setCookies).toEqual([expect.stringContaining(verifierName + "=; Max-Age=0")]);
 
 	callback.searchParams.set("error", "login_required");
 	const other = await finish(new Request(callback), verifier);
-	expect(other).toMatchObject({ ok: false, error: { error: "login_required" } });
+	expect(other).toMatchObject({ ok: false, reason: "provider_error", error: { error: "login_required" } });
 	expect(!other.ok && isAuthorizationDenied(other.error)).toBe(false);
 	expect(fetch).toHaveBeenCalledTimes(1); // Discovery only. A denial never exchanges tokens.
 });

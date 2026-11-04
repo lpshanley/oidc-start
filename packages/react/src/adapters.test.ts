@@ -223,6 +223,19 @@ describe("route handlers", () => {
 		expect(appended).toEqual(["s=1", "v=; Max-Age=0"]);
 	});
 
+	test("customizes callback failures after verifier cleanup and preserves host policy denial", async () => {
+		const appended = context();
+		const request = new Request("https://sage.test/callback");
+		const onError = vi.fn(async () => new Response("Retry later", { status: 503 }));
+		for (const reason of ["token_exchange_failed", "session_access_denied"]) {
+			core.callback.mockResolvedValueOnce({ ok: false, reason, error: new Error(), setCookies: ["v=; Max-Age=0"] });
+			const response = await routes.callbackRoute(request, { onError, errorRedirectUrl: "/fallback" });
+			expect(response.status).toBe(reason === "session_access_denied" ? 403 : 503);
+		}
+		expect(onError).toHaveBeenCalledExactlyOnceWith({ reason: "token_exchange_failed", request });
+		expect(appended).toEqual(["v=; Max-Age=0", "v=; Max-Age=0"]);
+	});
+
 	test("sign-out accepts only POST and redirects to the provider logout", async () => {
 		const appended = context({
 			session: { user: alice } as OidcContext["session"],
