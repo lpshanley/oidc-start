@@ -18,7 +18,7 @@ The host chooses the trusted issuer, registers exact callback URLs, enforces aut
 | Setting | Default | When to change it |
 | --- | --- | --- |
 | `sessionMaxAgeSeconds` | 14 days | Shorten the absolute lifetime when policy requires more frequent sign-in. Keep it consistent across replicas. |
-| `sessionIdleSeconds` | 12 hours | Shorten for shared devices. Last-seen updates on ordinary requests are written at five-minute intervals. Choose an idle limit comfortably above that interval. |
+| `sessionIdleSeconds` | 12 hours | Shorten for shared devices. Ordinary requests update the cookie after 1% of the idle limit has elapsed, rounded down to whole seconds with a one-second minimum and a five-minute maximum. A 60-second limit records activity every active second. |
 | `OIDC_SCOPES` | `openid profile email offline_access` | Request the profile claims your policy uses. Include the provider's refresh-token scope when sessions must survive access-token expiry. |
 | `OIDC_ROLES_CLAIM` | `roles` | Match the claim your provider maps into ID tokens or UserInfo. A missing claim yields an empty role list. |
 | `providerTimeoutMs` | 5,000 ms per provider request | Set it within the host request budget. Monitor discovery, token and key endpoint latency. |

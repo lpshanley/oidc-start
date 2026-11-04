@@ -43,8 +43,8 @@ const sessionSchema = z.object({
 });
 export type Session = z.infer<typeof sessionSchema>;
 
-/** Re-seal the cookie once the last-seen time is this stale, to keep idle tracking current. */
-export const TOUCH_AFTER_SECONDS = 300;
+/** Upper bound on how long ordinary requests can defer a last-seen cookie write. */
+const MAX_TOUCH_INTERVAL_SECONDS = 300;
 
 export type SessionResolution = {
 	session: Session | null;
@@ -76,6 +76,8 @@ export function createSessionManager({
 	/** Whether the (possibly refreshed) user may keep a session. */
 	allowSession: OidcMiddlewareOptions["allowSession"];
 }) {
+	// Bound idle-tracking imprecision to 1% of the timeout, down to the clock's one-second resolution.
+	const touchAfterSeconds = Math.max(1, Math.min(MAX_TOUCH_INTERVAL_SECONDS, Math.floor(idleSeconds / 100)));
 	const refreshes = new Map<
 		string,
 		{ result: Promise<RefreshedTokens>; settledAt?: number }
@@ -181,7 +183,7 @@ export function createSessionManager({
 		if (!session) return checked;
 		const now = Math.floor(Date.now() / 1000);
 		if (session.expiresAt - now > REFRESH_LEEWAY_SECONDS) {
-			if (now - session.lastSeenAt < TOUCH_AFTER_SECONDS) {
+			if (now - session.lastSeenAt < touchAfterSeconds) {
 				return { session, setCookies: [] };
 			}
 			const touched = { ...session, lastSeenAt: now };

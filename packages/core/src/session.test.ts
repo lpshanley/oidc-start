@@ -38,13 +38,14 @@ const revocations = {
 function setup(
 	allowSession: OidcMiddlewareOptions["allowSession"] = (user) => !user.roles || user.roles.includes("stellar"),
 	refreshCoordinator?: SessionRefreshCoordinator,
+	idleSeconds = 60 * 60 * 12,
 ) {
 	const refresh = vi.fn<OidcProvider["refresh"]>();
 	const manager = createSessionManager({
 		cookieName: () => "sage_session",
 		cookieOptions: () => ({ path: "/", httpOnly: true, sameSite: "lax" }),
 		maxAgeSeconds: 60 * 60 * 24 * 30,
-		idleSeconds: 60 * 60 * 12,
+		idleSeconds,
 		revocations,
 		refreshCoordinator,
 		allowSession,
@@ -270,6 +271,33 @@ describe("session lifetime and revocation", () => {
 		expect(result.session).toBeNull();
 		expect(apply(jar, result.setCookies).size).toBe(0);
 		expect(refresh).not.toHaveBeenCalled();
+	});
+
+	test.each([
+		[60, [30, 61]],
+		[1, [1, 2]],
+	] as const)("tracks activity with a %i-second idle limit", async (limit, requests) => {
+		const { manager } = setup(undefined, undefined, limit);
+		const jar = await jarWith(fresh);
+		for (const elapsed of requests) {
+			at(fresh.issuedAt + elapsed);
+			const result = await manager.resolve(jar);
+			expect(result.session?.lastSeenAt).toBe(fresh.issuedAt + elapsed);
+			apply(jar, result.setCookies);
+		}
+		at(fresh.issuedAt + requests[1] + limit + 1);
+		const expired = await manager.resolve(jar);
+		expect(expired.session).toBeNull();
+		expect(apply(jar, expired.setCookies).size).toBe(0);
+	});
+
+	test("coalesces ordinary cookie writes for five minutes with the default idle limit", async () => {
+		const { manager } = setup();
+		const jar = await jarWith({ ...fresh, expiresAt: fresh.issuedAt + 3600 });
+		at(fresh.issuedAt + 299);
+		expect((await manager.resolve(jar)).setCookies).toEqual([]);
+		at(fresh.issuedAt + 300);
+		expect((await manager.resolve(jar)).session?.lastSeenAt).toBe(fresh.issuedAt + 300);
 	});
 
 	test("awaits host access on a fresh session without refreshing", async () => {
