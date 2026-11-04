@@ -5,7 +5,7 @@ OpenID Connect sign-in and app-managed grants for Node.js, with a TanStack Start
 | Package | Public entries |
 | --- | --- |
 | `@lpshanley/oidc-start-core` | The root exports `createOidcCore`, session types and the revocation contract. Use `/models` for browser-safe user models and `/config` or `/provider` for server configuration and provider calls. |
-| `@lpshanley/oidc-start-react` | The root exports request middleware and route handlers. `/server` exposes the current request's OIDC context. |
+| `@lpshanley/oidc-start-react` | The root exports request middleware and route handlers. `/functions` exports browser-callable server functions. `/server` exposes the current request's OIDC context. |
 
 The host app decides which accounts may hold a session, supplies persistent revocation storage and registers its callback URLs with the provider. The React adapter uses the host's TanStack Start and Router installations.
 

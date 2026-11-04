@@ -14,3 +14,5 @@ export const Route = createFileRoute('/auth/callback')({
 ```
 
 Register `handleSignInRoute()` on GET and `handleSignOutRoute()` and `handleBackchannelLogoutRoute()` on POST. Configure the back-channel route to accept authenticated provider logout requests without a browser Origin header. Keep browser CSRF protection on sign-out.
+
+Import `getAuth`, `getSignInUrl` and `signOut` from `@lpshanley/oidc-start-react/functions`. Use `getOidcContext` from `@lpshanley/oidc-start-react/server` inside server handlers. The adapter ships ESM with its server-function declarations intact for the consuming app's Start compiler.

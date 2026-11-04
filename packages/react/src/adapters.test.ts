@@ -10,6 +10,7 @@ const start = vi.hoisted(() => ({
 				next: (o: unknown) => Promise<unknown>;
 		  }) => Promise<unknown>),
 	context: undefined as OidcContext | undefined,
+	setResponseHeader: vi.fn(),
 }));
 vi.mock("@tanstack/react-start", () => ({
 	createMiddleware: () => ({
@@ -20,6 +21,10 @@ vi.mock("@tanstack/react-start", () => ({
 	}),
 	getGlobalStartContext: () => ({ oidc: start.context }),
 }));
+vi.mock("@tanstack/react-start/server", () => ({
+	setResponseHeader: start.setResponseHeader,
+}));
+
 const core = {
 	resolve: vi.fn(),
 	signIn: vi.fn(),
@@ -35,6 +40,7 @@ vi.mock("@lpshanley/oidc-start-core", () => ({
 
 const { oidcMiddleware } = await import("./middleware.js");
 const routes = await import("./routes.server.js");
+const functions = await import("./functions.server.js");
 
 const alice = { sub: "alice", email: "alice@sage.test", name: "Alice" };
 
@@ -249,5 +255,34 @@ describe("route handlers", () => {
 			false,
 		);
 		expect(appended).toEqual(["s=; Max-Age=0"]);
+	});
+});
+
+describe("server function bodies", () => {
+	test("getAuth returns only the user and is not cached", () => {
+		context({ auth: () => ({ user: alice }) });
+
+		expect(functions.getAuthBody()).toEqual({ user: alice });
+		expect(start.setResponseHeader).toHaveBeenCalledWith(
+			"Cache-Control",
+			"no-store",
+		);
+	});
+
+	test("signOut queues the cleared session and throws a document redirect", async () => {
+		const appended = context();
+		core.signOut.mockResolvedValue({
+			location: "https://idp.test/logout",
+			setCookies: ["s=; Max-Age=0"],
+		});
+
+		const thrown = await functions
+			.signOutBody()
+			.catch((error: unknown) => error);
+
+		expect(appended).toEqual(["s=; Max-Age=0"]);
+		expect(thrown).toMatchObject({
+			options: { href: "https://idp.test/logout", reloadDocument: true },
+		});
 	});
 });

@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./functions": {
+      "types": "./dist/functions.d.ts",
+      "import": "./dist/functions.js"
+    },
     "./server": {
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
@@ -32,7 +36,8 @@
     "check-package": "publint --strict"
   },
   "dependencies": {
-    "@lpshanley/oidc-start-core": "workspace:*"
+    "@lpshanley/oidc-start-core": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",
