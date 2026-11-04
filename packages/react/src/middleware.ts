@@ -47,7 +47,8 @@ export function oidcMiddleware(setup: OidcMiddlewareSetup) {
 				request,
 				call,
 			);
-			const pending = [...setCookies];
+			let sessionUpdates = setCookies;
+			const appended: string[] = [];
 			const oidc: OidcContext = {
 				core,
 				request,
@@ -55,9 +56,11 @@ export function oidcMiddleware(setup: OidcMiddlewareSetup) {
 				session,
 				call,
 				auth: () => ({ user: session?.user ?? null }),
-				appendSetCookie: (line) => pending.push(line),
+				appendSetCookie: (line) => appended.push(line),
+				discardSessionUpdates: () => { sessionUpdates = []; },
 			};
 			const result = await next({ context: { oidc } });
+			const pending = [...sessionUpdates, ...appended];
 			if (pending.length) {
 				// Start must receive its original response to serialize RPC redirects.
 				const { appendResponseHeader } = await import("@tanstack/react-start/server");

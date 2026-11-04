@@ -126,6 +126,24 @@ describe("oidcMiddleware", () => {
 		expect(createOidcCore).not.toHaveBeenCalled();
 	});
 
+	test("a successful account switch supersedes all writes for the old session", async () => {
+		oidcMiddleware({ core: () => core as unknown as OidcContext["core"] });
+		core.resolve.mockResolvedValueOnce({
+			cookies: new Map([["s.0", "old-chunk"]]), session: { user: alice },
+			setCookies: ["s=alice", "s.0=; Max-Age=0"],
+		});
+		const newSession = ["s.0=bob-0", "s.1=bob-1", "v=; Max-Age=0"];
+		core.callback.mockResolvedValueOnce({ ok: true, location: "https://sage.test/account", setCookies: newSession });
+		const request = new Request("https://sage.test/callback");
+		await start.server?.({ request, next: async (options) => {
+			const { oidc } = (options as { context: { oidc: OidcContext } }).context;
+			start.context = oidc;
+			oidc.appendSetCookie("theme=dark");
+			return routes.callbackRoute(request, {});
+		} });
+		expect(start.appendResponseHeader).toHaveBeenLastCalledWith("Set-Cookie", ["theme=dark", ...newSession]);
+	});
+
 	test("passes the response through untouched with nothing queued", async () => {
 		oidcMiddleware({ core: () => core as unknown as OidcContext["core"] });
 		core.resolve.mockResolvedValue({

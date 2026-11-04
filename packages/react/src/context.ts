@@ -14,6 +14,8 @@ export type OidcContext = {
 	auth: () => OidcAuth;
 	/** Queue a Set-Cookie line for the final response. */
 	appendSetCookie: (line: string) => void;
+	/** Drop cookie writes from resolving the incoming session when a handler supersedes it. */
+	discardSessionUpdates?: () => void;
 };
 
 const NOT_CONFIGURED =
