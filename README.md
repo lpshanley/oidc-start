@@ -69,6 +69,22 @@ Run `pnpm --filter oidc-start-example dev` after verification to try the example
 
 ## Releases
 
-The root is private. Changesets versions the two public packages together. Run `pnpm changeset` with a user-facing change and `pnpm version-packages` when preparing a release. Before publishing, follow the [consumer install steps](#install-in-an-existing-tanstack-start-app) with both tarballs from the release build.
+Changesets versions the two public packages together. Add a changeset for a user-facing change. For subsequent releases, use `pnpm changeset pre enter next` to enter the prerelease cycle, `pnpm version-packages` to apply changesets, and `pnpm changeset pre exit` before versioning for stable. Review and commit the manifest, lockfile and Changesets updates together. The release tag must match both package versions.
 
-Check the consumer's dev and production builds, including a browser call to `getAuth`, sign-in, refresh and logout. Publish an approved prerelease with the `next` dist-tag under the `@lpshanley` scope.
+**Before the first public release**, run the [Release to npm workflow](.github/workflows/release.yml) manually on `main`. Download its `npm-tarballs-*` artifact and use those two archives in a clean consumer app. Check development and production builds. The remaining browser test is a round trip against a local OIDC issuer: sign in, return through the callback, reload as the same user, sign out, and reload anonymously. Manual workflow runs only verify and pack.
+
+**One-time setup**
+
+1. On GitHub, require the `verify` check on `main`. Create an active tag ruleset for `v*` that restricts creation, updates and deletion to release maintainers. Create the `npm` environment, limit deployments to release tags matching `v*`, and configure release approval there. The release workflow checks that the tag is protected and its commit is on `main`.
+2. For the initial `0.1.0-next.0`, sign in to npm with an account that controls the `@lpshanley` scope and has 2FA. From the extracted, verified artifact, run these in order:
+
+   ```sh
+   npm publish ./lpshanley-oidc-start-core-0.1.0-next.0.tgz --access public --tag next --ignore-scripts
+   npm publish ./lpshanley-oidc-start-react-0.1.0-next.0.tgz --access public --tag next --ignore-scripts
+   ```
+
+3. On **each** npm package, add a GitHub Actions trusted publisher for owner `lpshanley`, repository `oidc-start`, workflow filename `release.yml`, and environment `npm`. Enable direct `npm publish`. Configure trust when the next unpublished release is ready: npm currently requires a first successful workflow publish within two days of creating the configuration. The public repository and GitHub-hosted runner enable automatic npm provenance for CI publications. [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+
+**Subsequent releases** start by pushing an annotated `vX.Y.Z-next.N` or `vX.Y.Z` tag for the reviewed version on `main`. The workflow runs `pnpm verify`, packs both packages and checks the version and the adapter's dependency on core. The `npm` job publishes those exact artifacts, core first, with the `next` or `latest` dist-tag respectively. Only that job has OIDC publishing permission.
+
+If a publish fails partway through, use **Re-run failed jobs** on the same workflow run so the publisher gets the same tarballs. It skips an existing version only if npm reports the same SHA-512 digest. A digest mismatch requires investigating the existing publication before cutting another version.
