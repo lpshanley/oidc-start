@@ -96,7 +96,17 @@ function Home() {
 }
 ```
 
-For shared UI such as an account menu, load `getAuth()` in the root route and wrap `<Outlet />` in `<OidcAuthProvider auth={Route.useLoaderData()}>`. Import the provider and `useAuth` from `@lpshanley/oidc-start-react/client`. Components can then call `const { user, signIn, signOut } = useAuth()` and bind buttons with `onClick={() => signIn()}` or `onClick={() => signOut()}`. The first render uses the loader's user, and subsequent loader updates flow through the provider. [Example root route](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/__root.tsx)
+### Share the root loader's user
+
+For shared UI such as an account menu, put `loader: () => getAuth()` on the root route. Inside the root document's body, pass the result directly to the provider.
+
+```tsx
+<OidcAuthProvider auth={Route.useLoaderData()}>
+  <Outlet />
+</OidcAuthProvider>
+```
+
+Import `OidcAuthProvider` and `useAuth` from `@lpshanley/oidc-start-react/client`. Components can then call `const { user, signIn, signOut } = useAuth()`. The first render uses the loader's user, and subsequent loader updates flow through the provider. [Example root route](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/__root.tsx)
 
 Call `signOut()` for the current session or `signOut({ everywhere: true })` for all of this user's sessions in this app. Both use the same CSRF-protected POST server function. If the revocation store is unavailable, the server returns 503 so the user can retry.
 
