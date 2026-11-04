@@ -13,8 +13,12 @@ const revocations: SessionRevocations = {
 			|| issuedAt <= (userCutoffs.get(sub) ?? 0);
 	},
 	async revoke(sid, until) { sessions.set(sid, until); },
-	async revokeIdpSession(sid, until) { providerSessions.set(sid, until); },
-	async revokeAllFor(sub, cutoff) { userCutoffs.set(sub, cutoff); },
+	async revokeIdpSession(sid, until) {
+		providerSessions.set(sid, Math.max(providerSessions.get(sid) ?? 0, until));
+	},
+	async revokeAllFor(sub, cutoff) {
+		userCutoffs.set(sub, Math.max(userCutoffs.get(sub) ?? 0, cutoff));
+	},
 };
 
 export const auth = createOidcCore({

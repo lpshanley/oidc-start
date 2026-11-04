@@ -15,7 +15,7 @@ import {
 	parseCookies,
 	serializeCookie,
 } from "./cookies.js";
-import { type LogoutTarget, LogoutTokenError } from "./logout-token.js";
+import { LOGOUT_TOKEN_MAX_AGE_SECONDS, type LogoutTarget, LogoutTokenError } from "./logout-token.js";
 import { type AuthUser, sanitizeReturnPath } from "./models.js";
 import {
 	createProvider,
@@ -477,14 +477,16 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 						!(error instanceof errors.JWKSTimeout));
 				return { status: invalid ? 400 : 503 };
 			}
-			const now = Math.floor(Date.now() / 1000);
+			// Retries must apply the original event, even after a new sign-in.
 			try {
 				if ("sid" in target) {
+					// A session active on the last possible delivery must stay revoked
+					// for its full lifetime. Every delivery writes the same expiry.
 					await options.revocations.revokeIdpSession(
 						target.sid,
-						now + settings.sessionMaxAgeSeconds,
+						target.issuedAt + LOGOUT_TOKEN_MAX_AGE_SECONDS + settings.sessionMaxAgeSeconds,
 					);
-				} else await options.revocations.revokeAllFor(target.sub, now);
+				} else await options.revocations.revokeAllFor(target.sub, target.issuedAt);
 			} catch (error) {
 				onError({ operation: "backchannel-logout", error, context });
 				return { status: 503 };

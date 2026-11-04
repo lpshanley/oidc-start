@@ -309,7 +309,7 @@ describe("back-channel logout tokens", () => {
 			jwks_uri: "https://idp.test/jwks/",
 		});
 		return (claims: Record<string, unknown>, audience = "sage-web") =>
-			new SignJWT(claims)
+			new SignJWT({ exp: Math.floor(Date.now() / 1000) + 300, jti: "token-1", ...claims })
 				.setProtectedHeader({ alg: "RS256", kid: "k1", typ: "logout+jwt" })
 				.setIssuer(issuer)
 				.setAudience(audience)
@@ -326,14 +326,14 @@ describe("back-channel logout tokens", () => {
 			provider.verifyLogoutToken(
 				await sign({ sub: "alice", sid: "idp-1", events: event }),
 			),
-		).resolves.toEqual({ sid: "idp-1" });
+		).resolves.toEqual({ sid: "idp-1", issuedAt: expect.any(Number) });
 		await expect(
 			provider.verifyLogoutToken(await sign({ sub: "alice", events: event })),
-		).resolves.toEqual({ sub: "alice" });
+		).resolves.toEqual({ sub: "alice", issuedAt: expect.any(Number) });
 		vi.unstubAllGlobals();
 	});
 
-	test("rejects another client's token, a missing event, or a nonce", async () => {
+	test("rejects invalid claims in a correctly signed logout token", async () => {
 		vi.useRealTimers();
 		const sign = await signer();
 		const provider = createProvider(settings);
@@ -342,6 +342,12 @@ describe("back-channel logout tokens", () => {
 			await sign({ sub: "alice", events: event }, "other-client"),
 			await sign({ sub: "alice" }),
 			await sign({ sub: "alice", events: event, nonce: "n" }),
+			await sign({ sub: "alice", events: event, exp: undefined }),
+			await sign({ sub: "alice", events: event, exp: 1 }),
+			await sign({ sub: "alice", events: event, jti: undefined }),
+			await sign({ sub: "alice", events: event, jti: "" }),
+			await sign({ sub: "alice", events: event, jti: 123 }),
+			await sign({ sub: "alice", events: { "http://schemas.openid.net/event/backchannel-logout": [] } }),
 		]) {
 			await expect(provider.verifyLogoutToken(token)).rejects.toThrow();
 		}

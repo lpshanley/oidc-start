@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createRemoteJWKSet, jwtVerify, customFetch as jwksFetch } from "jose";
 import * as client from "openid-client";
 import type { OidcCallContext, OidcConfiguration } from "./config.js";
-import { LogoutTokenError, logoutTarget } from "./logout-token.js";
+import { LOGOUT_TOKEN_MAX_AGE_SECONDS, LogoutTokenError, logoutTarget } from "./logout-token.js";
 import type { AuthUser } from "./models.js";
 
 // OpenID Connect operations over openid-client, standing in for the WorkOS
@@ -274,7 +274,8 @@ export function createProvider(
 			const { payload } = await jwtVerify(token, jwks, {
 				issuer: metadata.issuer,
 				audience: settings.OIDC_CLIENT_ID,
-				maxTokenAge: "10 minutes",
+				maxTokenAge: LOGOUT_TOKEN_MAX_AGE_SECONDS,
+					requiredClaims: ["exp", "jti"],
 			});
 			return logoutTarget(payload);
 		},
