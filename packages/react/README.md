@@ -8,10 +8,10 @@ For multi-replica deployment, see the [production guide](https://github.com/lpsh
 
 ## 1. Install and configure the server
 
-Use Node.js 22.12 or newer. Your app supplies `@tanstack/react-start@^1.169.2` and `@tanstack/react-router@^1.170.44`. Install both OIDC packages because your app imports the core directly.
+Use Node.js 22.12 or newer. Your app supplies `@tanstack/react-start@^1.169.2` and `@tanstack/react-router@^1.170.44`. Install the React adapter. It brings in the OIDC core as a dependency.
 
 ```sh
-npm install @lpshanley/oidc-start-react @lpshanley/oidc-start-core
+npm install @lpshanley/oidc-start-react
 ```
 
 Register a confidential web client with your OIDC provider. If your app runs at `http://localhost:5173`, register these exact URLs. Use your public HTTPS origin in production.
@@ -32,7 +32,7 @@ OIDC_CLIENT_SECRET=your-client-secret
 SESSION_SECRET=
 ```
 
-For local development, copy the example’s `auth.server.ts` into `src/auth.server.ts`. It exports an `auth` instance configured with `callbackPath: '/callback'` and `postLogoutPath: '/'`. The example admits any authenticated user and keeps revocations in memory. For deployment, set `allowSession` to your access policy and use a durable revocation store shared by all instances. [Copy auth.server.ts](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/auth.server.ts) · [Core configuration and storage](https://www.npmjs.com/package/@lpshanley/oidc-start-core)
+Import `createOidcCore` and the `SessionRevocations` type from `@lpshanley/oidc-start-react/server` in your server module. For local development, copy the example’s `auth.server.ts` into `src/auth.server.ts`. It exports an `auth` instance configured with `callbackPath: '/callback'` and `postLogoutPath: '/'`. The example admits any authenticated user and keeps revocations in memory. For deployment, set `allowSession` to your access policy and use a durable revocation store shared by all instances. [Copy auth.server.ts](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/auth.server.ts) · [Core configuration and storage](https://www.npmjs.com/package/@lpshanley/oidc-start-core)
 
 ## 2. Register the request middleware
 
@@ -69,7 +69,7 @@ export const Route = createFileRoute('/callback')({
 In `src/routes/index.tsx`, call `getAuth()` from the loader. It returns `{ user }`, with `user: null` for a signed-out visitor. Bind `signOut` with `useServerFn` so TanStack follows the redirect to the provider when the user clicks the button.
 
 ```tsx
-import { displayName } from '@lpshanley/oidc-start-core/models'
+import { displayName } from '@lpshanley/oidc-start-react'
 import { getAuth, getSignInUrl, signOut } from '@lpshanley/oidc-start-react/functions'
 import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'

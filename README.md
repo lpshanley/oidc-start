@@ -5,7 +5,7 @@ OpenID Connect sign-in and app-managed grants for Node.js, with a TanStack Start
 | Package | Public entries |
 | --- | --- |
 | `@lpshanley/oidc-start-core` | The root exports `createOidcCore`, session types and the revocation contract. Use `/models` for browser-safe user models and `/config` or `/provider` for server configuration and provider calls. |
-| `@lpshanley/oidc-start-react` | The root exports request middleware and route handlers. `/functions` exports browser-callable server functions. `/server` exposes the current request's OIDC context. |
+| `@lpshanley/oidc-start-react` | The root exports user models, display helpers, request middleware and route handlers. Use `/functions` for browser-callable server functions and `/server` for `createOidcCore`, session types and the current request's OIDC context. |
 
 The host app decides which accounts may hold a session, supplies persistent revocation storage and registers its callback URLs with the provider. The React adapter uses the host's TanStack Start and Router installations.
 
@@ -15,10 +15,10 @@ For deployment, see the [production guide](docs/production.md), [PostgreSQL exam
 
 The packages require Node.js 22.12 or newer. Keep the host's React and TanStack installations. The adapter's peer ranges are `@tanstack/react-start@^1.169.2` and `@tanstack/react-router@^1.170.44`. The [working example](examples/tanstack-start) uses Start 1.169.4 and Router 1.170.46.
 
-Install both packages from npm in the consuming app.
+Install the React adapter in the consuming app. It depends on the matching core package.
 
 ```sh
-pnpm add @lpshanley/oidc-start-core @lpshanley/oidc-start-react
+pnpm add @lpshanley/oidc-start-react
 ```
 
 To try unreleased changes from this checkout, use two local tarballs instead. From the **library root**, use Node 26 and pnpm 12.6.0. Set `app_dir` to the absolute path of the consuming app.
@@ -41,10 +41,10 @@ overrides:
 
 ```sh
 cd "$app_dir"
-pnpm add ./vendor/lpshanley-oidc-start-core-VERSION.tgz ./vendor/lpshanley-oidc-start-react-VERSION.tgz
+pnpm add ./vendor/lpshanley-oidc-start-react-VERSION.tgz
 ```
 
-Keep both archives with the app's manifest and lockfile so CI can run a frozen install. If the app belongs to a larger pnpm workspace, put the override in the workspace root, make its tarball path relative to that root, and add both dependencies to the app package.
+Keep both archives with the app's manifest and lockfile so CI can run a frozen install. If the app belongs to a larger pnpm workspace, put the override in the workspace root, make its tarball path relative to that root, and add the React tarball to the app package.
 
 ## Wire up sign-in
 
@@ -58,7 +58,9 @@ To check the integration, open `/` in a fresh browser session. It should show **
 
 ## Migrating existing applications
 
-Replace middleware and route imports from the old application packages with `@lpshanley/oidc-start-react`. Import `createOidcCore` from `@lpshanley/oidc-start-core` and `getOidcContext` from `@lpshanley/oidc-start-react/server`. Each host supplies `allowSession` and a revocation store explicitly.
+Replace middleware and route imports from the old application packages with `@lpshanley/oidc-start-react`. Import `createOidcCore` and `getOidcContext` from `@lpshanley/oidc-start-react/server`. Each host supplies `allowSession` and a revocation store explicitly.
+
+Apps upgrading from the 0.1.0 React adapter can move imports from `@lpshanley/oidc-start-core/models` to the React package root and imports from the core package root to `@lpshanley/oidc-start-react/server`. Once the app has no direct core imports, remove its direct core dependency.
 
 Stellar can keep its cookie prefix, sealing secret, access policy and revocation adapter. Great Sage's older cookie format lacks the session ID and timestamps used for revocation and idle expiry. Plan for users to sign in again when switching from that format. Great Sage's independent provider grants use `startGrant`, `finishGrant` and `refreshGrant`; grant storage and authorization belong to the host.
 
