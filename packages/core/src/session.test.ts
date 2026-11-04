@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CHUNK_SIZE } from "./cookies.js";
+import type { OidcMiddlewareOptions } from "./config.js";
 import type { SessionRefreshCoordinator } from "./refresh.js";
 import type { OidcProvider } from "./provider.js";
 import { createSessionManager, type Session } from "./session.js";
@@ -35,15 +36,16 @@ const revocations = {
 };
 
 function setup(
-	allowSession = (user: Session["user"]) => !user.roles || user.roles.includes("stellar"),
+	allowSession: OidcMiddlewareOptions["allowSession"] = (user) => !user.roles || user.roles.includes("stellar"),
 	refreshCoordinator?: SessionRefreshCoordinator,
+	idleSeconds = 60 * 60 * 12,
 ) {
 	const refresh = vi.fn<OidcProvider["refresh"]>();
 	const manager = createSessionManager({
 		cookieName: () => "sage_session",
 		cookieOptions: () => ({ path: "/", httpOnly: true, sameSite: "lax" }),
 		maxAgeSeconds: 60 * 60 * 24 * 30,
-		idleSeconds: 60 * 60 * 12,
+		idleSeconds,
 		revocations,
 		refreshCoordinator,
 		allowSession,
@@ -271,9 +273,36 @@ describe("session lifetime and revocation", () => {
 		expect(refresh).not.toHaveBeenCalled();
 	});
 
-	test("rechecks host access on a fresh session without refreshing", async () => {
+	test.each([
+		[60, [30, 61]],
+		[1, [1, 2]],
+	] as const)("tracks activity with a %i-second idle limit", async (limit, requests) => {
+		const { manager } = setup(undefined, undefined, limit);
+		const jar = await jarWith(fresh);
+		for (const elapsed of requests) {
+			at(fresh.issuedAt + elapsed);
+			const result = await manager.resolve(jar);
+			expect(result.session?.lastSeenAt).toBe(fresh.issuedAt + elapsed);
+			apply(jar, result.setCookies);
+		}
+		at(fresh.issuedAt + requests[1] + limit + 1);
+		const expired = await manager.resolve(jar);
+		expect(expired.session).toBeNull();
+		expect(apply(jar, expired.setCookies).size).toBe(0);
+	});
+
+	test("coalesces ordinary cookie writes for five minutes with the default idle limit", async () => {
+		const { manager } = setup();
+		const jar = await jarWith({ ...fresh, expiresAt: fresh.issuedAt + 3600 });
+		at(fresh.issuedAt + 299);
+		expect((await manager.resolve(jar)).setCookies).toEqual([]);
+		at(fresh.issuedAt + 300);
+		expect((await manager.resolve(jar)).session?.lastSeenAt).toBe(fresh.issuedAt + 300);
+	});
+
+	test("awaits host access on a fresh session without refreshing", async () => {
 		let hasAccess = true;
-		const { manager, refresh } = setup(() => hasAccess);
+		const { manager, refresh } = setup(async () => hasAccess);
 		const jar = await jarWith(fresh);
 		expect((await manager.resolve(jar)).session?.user.sub).toBe(user.sub);
 
@@ -283,6 +312,16 @@ describe("session lifetime and revocation", () => {
 		expect(result.session).toBeNull();
 		expect(apply(jar, result.setCookies).size).toBe(0);
 		expect(refresh).not.toHaveBeenCalled();
+	});
+
+	test("awaits the policy again with the refreshed roles", async () => {
+		const { manager, refresh } = setup(async (user) => user.roles?.includes("member") === true);
+		const jar = await jarWith({ ...fresh, user: { ...user, roles: ["member"] }, expiresAt: 1010 });
+		refresh.mockResolvedValueOnce({ accessToken: "next", expiresAt: 2000, roles: [] });
+		const result = await manager.resolve(jar);
+		expect(refresh).toHaveBeenCalledOnce();
+		expect(result.session).toBeNull();
+		expect(apply(jar, result.setCookies).size).toBe(0);
 	});
 
 	test("ends sessions that are revoked, too old, or no longer members", async () => {

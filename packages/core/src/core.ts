@@ -1,5 +1,5 @@
 import { errors } from "jose";
-import { randomNonce, randomPKCECodeVerifier } from "openid-client";
+import { randomNonce, randomPKCECodeVerifier, randomState } from "openid-client";
 import {
 	assertOidcConfigured,
 	authOriginConfigurationSchema,
@@ -53,14 +53,15 @@ export class OidcDeadlineError extends Error {
  * Settles with the work, or rejects once the caller's deadline passes. Each
  * provider request also has its own timeout, so abandoned work still ends.
  */
-export function withinDeadline<T>(
-	work: Promise<T>,
+export async function withinDeadline<T>(
+	start: () => Promise<T>,
 	context?: OidcCallContext,
 	now = Date.now(),
 ): Promise<T> {
-	if (context?.deadline === undefined) return work;
+	if (context?.deadline === undefined) return start();
 	const remaining = context.deadline - now;
-	if (remaining <= 0) return Promise.reject(new OidcDeadlineError());
+	if (remaining <= 0) throw new OidcDeadlineError();
+	const work = start();
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const expired = new Promise<never>((_, reject) => {
 		timer = setTimeout(() => reject(new OidcDeadlineError()), remaining);
@@ -190,8 +191,10 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 	) {
 		const nonce = randomNonce();
 		const codeVerifier = randomPKCECodeVerifier();
-		const state = await sealState(
+		const state = randomState();
+		const verifier = await sealState(
 			{
+				state,
 				purpose,
 				nonce,
 				codeVerifier,
@@ -202,7 +205,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		);
 		const name = verifierCookieName(prefix(), state);
 		const url = await withinDeadline(
-			provider().authorizationUrl(
+			() => provider().authorizationUrl(
 				{
 					redirectUri: callbackUri(purpose, request),
 					loginHint: options.loginHint,
@@ -223,7 +226,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		return {
 			url: url.toString(),
 			setCookies: [
-				serializeCookie(name, state, {
+					serializeCookie(name, verifier, {
 					...cookieOptions(),
 					maxAge: STATE_MAX_AGE_SECONDS,
 				}),
@@ -260,7 +263,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			const callbackUrl = new URL(callbackUri(purpose, request));
 			callbackUrl.search = url.search;
 			const { user, tokens, idpSid, authTime } = await withinDeadline(
-				provider().exchangeCode(
+				() => provider().exchangeCode(
 					callbackUrl,
 					{
 						state,
@@ -329,7 +332,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			if (!result.ok) return result;
 			const { user, tokens, idpSid, authTime, flow, clearVerifier } = result;
 			try {
-				if (!options.allowSession(user)) throw new SessionAccessDeniedError();
+					if (!(await sessions.isAllowed(user))) throw new SessionAccessDeniedError();
 				const now = Math.floor(Date.now() / 1000);
 				return {
 					ok: true,
@@ -396,7 +399,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		): Promise<GrantRefresh> {
 			try {
 				const tokens = await withinDeadline(
-					provider().refreshGrantTokens(refreshToken, context),
+					() => provider().refreshGrantTokens(refreshToken, context),
 					context,
 				);
 				return { status: "refreshed", tokens };
@@ -442,10 +445,11 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 					);
 				}
 			}
-			if (session?.refreshToken) {
+			const refreshToken = session?.refreshToken;
+			if (refreshToken) {
 				try {
 					await withinDeadline(
-						provider().revokeRefreshToken(session.refreshToken, context),
+						() => provider().revokeRefreshToken(refreshToken, context),
 						context,
 					);
 				} catch (error) {
@@ -458,7 +462,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			try {
 				location =
 					(await withinDeadline(
-						provider().endSessionUrl(
+						() => provider().endSessionUrl(
 							{
 								idTokenHint: session?.idToken,
 								postLogoutRedirectUri: afterLogout,
@@ -492,7 +496,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			let target: LogoutTarget;
 			try {
 				target = await withinDeadline(
-					provider().verifyLogoutToken(token, context),
+					() => provider().verifyLogoutToken(token, context),
 					context,
 				);
 			} catch (error) {

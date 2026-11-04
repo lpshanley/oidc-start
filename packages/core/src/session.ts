@@ -1,4 +1,4 @@
-import type { OidcCallContext } from "./config.js";
+import type { OidcCallContext, OidcMiddlewareOptions } from "./config.js";
 import { z } from "zod";
 import {
 	type CookieOptions,
@@ -43,8 +43,8 @@ const sessionSchema = z.object({
 });
 export type Session = z.infer<typeof sessionSchema>;
 
-/** Re-seal the cookie once the last-seen time is this stale, to keep idle tracking current. */
-export const TOUCH_AFTER_SECONDS = 300;
+/** Upper bound on how long ordinary requests can defer a last-seen cookie write. */
+const MAX_TOUCH_INTERVAL_SECONDS = 300;
 
 export type SessionResolution = {
 	session: Session | null;
@@ -74,8 +74,10 @@ export function createSessionManager({
 	revocations: SessionRevocations;
 	refreshCoordinator?: SessionRefreshCoordinator;
 	/** Whether the (possibly refreshed) user may keep a session. */
-	allowSession: (user: Session["user"]) => boolean;
+	allowSession: OidcMiddlewareOptions["allowSession"];
 }) {
+	// Bound idle-tracking imprecision to 1% of the timeout, down to the clock's one-second resolution.
+	const touchAfterSeconds = Math.max(1, Math.min(MAX_TOUCH_INTERVAL_SECONDS, Math.floor(idleSeconds / 100)));
 	const refreshes = new Map<
 		string,
 		{ result: Promise<RefreshedTokens>; settledAt?: number }
@@ -124,6 +126,10 @@ export function createSessionManager({
 		return clearChunked(cookies, name(), cookieOptions());
 	}
 
+	async function isAllowed(user: Session["user"]) {
+		return (await allowSession(user)) === true;
+	}
+
 	// Verify the cookie, host policy, lifetimes, and revocation before using it.
 	// A store read failure propagates so sign-out can be retried.
 	async function readActive(
@@ -144,7 +150,7 @@ export function createSessionManager({
 		if (
 			now - session.issuedAt > maxAgeSeconds ||
 			now - session.lastSeenAt > idleSeconds ||
-			!allowSession(session.user)
+			!(await isAllowed(session.user))
 		) {
 			return { session: null, setCookies: clear(cookies) };
 		}
@@ -169,7 +175,7 @@ export function createSessionManager({
 	async function resolve(
 		cookies: Map<string, string>,
 		onError: (error: unknown, operation: "refresh" | "revocation-read") => void = () => {},
-		bound: <T>(work: Promise<T>) => Promise<T> = (work) => work,
+		bound: <T>(start: () => Promise<T>) => Promise<T> = (start) => start(),
 		context?: OidcCallContext,
 	): Promise<SessionResolution> {
 		const checked = await readActive(cookies, (error) => onError(error, "revocation-read"));
@@ -177,7 +183,7 @@ export function createSessionManager({
 		if (!session) return checked;
 		const now = Math.floor(Date.now() / 1000);
 		if (session.expiresAt - now > REFRESH_LEEWAY_SECONDS) {
-			if (now - session.lastSeenAt < TOUCH_AFTER_SECONDS) {
+			if (now - session.lastSeenAt < touchAfterSeconds) {
 				return { session, setCookies: [] };
 			}
 			const touched = { ...session, lastSeenAt: now };
@@ -188,15 +194,14 @@ export function createSessionManager({
 		}
 		try {
 			const refreshToken = session.refreshToken;
-			const work = refreshCoordinator
+			const refreshedTokens = await bound(() => refreshCoordinator
 				? sharedRefresh(refreshCoordinator, {
 					session,
 					until: session.issuedAt + maxAgeSeconds,
 					password: password(),
 					refresh: () => provider().refresh(refreshToken, session.user.sub, context),
 				})
-				: refreshOnce(refreshToken, session.user.sub, context);
-			const refreshedTokens = await bound(work);
+				: refreshOnce(refreshToken, session.user.sub, context));
 			if (!refreshedTokens) return { session: null, setCookies: [] };
 			const { roles, ...tokens } = refreshedTokens;
 			const refreshed: Session = {
@@ -207,7 +212,7 @@ export function createSessionManager({
 				user: { ...session.user, roles },
 				lastSeenAt: now,
 			};
-			if (!allowSession(refreshed.user)) {
+			if (!(await isAllowed(refreshed.user))) {
 				return { session: null, setCookies: clear(cookies) };
 			}
 			return {
@@ -222,7 +227,7 @@ export function createSessionManager({
 		}
 	}
 
-	return { readActive, resolve, write, clear };
+	return { isAllowed, readActive, resolve, write, clear };
 }
 
 export type SessionManager = ReturnType<typeof createSessionManager>;

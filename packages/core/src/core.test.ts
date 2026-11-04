@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { verifierCookieName } from "./state.js";
 
 const oidc = vi.hoisted(() => {
 	const metadata: Record<string, string> = {
@@ -12,6 +13,7 @@ const oidc = vi.hoisted(() => {
 		})),
 		allowInsecureRequests: vi.fn(),
 		randomNonce: vi.fn(() => "nonce-1"),
+		randomState: () => crypto.randomUUID(),
 		randomPKCECodeVerifier: vi.fn(() => "verifier-1"),
 		calculatePKCECodeChallenge: vi.fn(async () => "challenge"),
 		buildAuthorizationUrl: vi.fn(
@@ -181,11 +183,15 @@ describe("OIDC core", () => {
 		});
 	});
 
-	test("an authenticated user denied by the host receives no session cookie", async () => {
+	test.each([
+		["a synchronous denial", () => false],
+		["an asynchronous denial", async () => false],
+		["a truthy non-boolean from JavaScript", () => "false" as unknown as boolean],
+	])("an authenticated user receives no session cookie for %s", async (_, deny) => {
 		const auth = createOidcCore({
 			environment: () => env,
 			revocations,
-			allowSession: () => false,
+			allowSession: deny,
 		});
 		const jar = new Map<string, string>();
 		const start = await auth.signIn(request("/"), jar);
@@ -232,6 +238,22 @@ describe("OIDC core", () => {
 		);
 	});
 
+	test.each(["session", "grant"])("requires the initiating browser's cookie for a %s callback", async (purpose) => {
+		const auth = core();
+		const begin = purpose === "session" ? auth.signIn : auth.startGrant;
+		const finish = purpose === "session" ? auth.callback : auth.finishGrant;
+		const start = await begin(request("/"), new Map(), "/");
+		const params = new URL(start.url).searchParams;
+		const callback = new URL(params.get("redirect_uri")!);
+		const state = params.get("state")!;
+		callback.search = new URLSearchParams({ state, code: "unused" }).toString();
+		const reconstructed = new Map([[verifierCookieName("__Host-sage", state), state]]);
+		const exchanges = oidc.authorizationCodeGrant.mock.calls.length;
+		expect(await finish(new Request(callback), reconstructed)).toMatchObject({ ok: false, reason: "invalid_state" });
+		expect(oidc.authorizationCodeGrant).toHaveBeenCalledTimes(exchanges);
+		expect(await finish(new Request(callback), apply(new Map(), start.setCookies))).toMatchObject({ ok: true });
+	});
+
 	test("sanitizes return paths and evicts excess pending verifiers", async () => {
 		const auth = core();
 		const jar = new Map(
@@ -241,7 +263,7 @@ describe("OIDC core", () => {
 			),
 		);
 
-		const { setCookies } = await auth.signIn(
+		const { url, setCookies } = await auth.signIn(
 			request("/"),
 			jar,
 			"//evil.test/x",
@@ -249,7 +271,7 @@ describe("OIDC core", () => {
 		const result = await auth.callback(
 			request(
 				`/api/auth/callback?code=c&state=${encodeURIComponent(
-					decodeURIComponent(setCookies[0]?.split(";")[0]?.split("=")[1] ?? ""),
+					new URL(url).searchParams.get("state")!,
 				)}`,
 			),
 			apply(new Map(), setCookies.slice(0, 1)),
@@ -344,18 +366,20 @@ describe("assertConfigured", () => {
 
 describe("withinDeadline", () => {
 	test("passes work through without a deadline", async () => {
-		await expect(withinDeadline(Promise.resolve(1))).resolves.toBe(1);
+		await expect(withinDeadline(() => Promise.resolve(1))).resolves.toBe(1);
 	});
 
-	test("rejects at once when the deadline has passed", async () => {
+	test("does not start work that could reject after an expired deadline", async () => {
+		const start = vi.fn(async () => { throw new Error("provider failure"); });
 		await expect(
-			withinDeadline(new Promise(() => {}), { deadline: 10 }, 20),
+			withinDeadline(start, { deadline: 10 }, 20),
 		).rejects.toBeInstanceOf(OidcDeadlineError);
+		expect(start).not.toHaveBeenCalled();
 	});
 
 	test("rejects hung work when the remaining time runs out", async () => {
 		vi.useFakeTimers();
-		const hung = withinDeadline(new Promise(() => {}), {
+		const hung = withinDeadline(() => new Promise(() => {}), {
 			deadline: Date.now() + 1_000,
 		});
 		const settled = expect(hung).rejects.toBeInstanceOf(OidcDeadlineError);
