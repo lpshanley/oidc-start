@@ -184,6 +184,29 @@ beforeLoad: ({ location }) => requireAuth({ signInPath: '/sign-in', returnPathna
 
 The helper reads the session on the server. A guest follows a document redirect to the sign-in route. A signed-in user is available as `Route.useRouteContext().user`. Enforce authorization in every server function or endpoint that serves private data, including those called by the guarded route.
 
+### Restrict an admin route by role
+
+Import `requireAuth` from `@lpshanley/oidc-start-react/functions`, `hasRole` from the package root, and `redirect` from `@tanstack/react-router`. Compose them in the admin route's `beforeLoad`.
+
+```ts
+beforeLoad: async ({ location }) => {
+  const { user } = await requireAuth({ signInPath: '/sign-in', returnPathname: location.href })
+  if (!hasRole(user, 'admin')) throw redirect({ href: '/forbidden', reloadDocument: true })
+  return { user }
+}
+```
+
+Guests sign in and return to the requested URL. An admin sees the dashboard. A signed-in user without the role goes to the app's `/forbidden` endpoint, which returns HTTP 403. Use role names from your provider's configured roles claim. [Admin route](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/admin.tsx) · [Forbidden response](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/forbidden.ts)
+
+Private endpoints must also check the current request before reading admin data or performing a mutation. In a server route handler, import `getOidcContext` from `@lpshanley/oidc-start-react/server` and check the resolved user.
+
+```ts
+const { user } = getOidcContext().auth()
+if (!user) return new Response(null, { status: 401 })
+if (!hasRole(user, 'admin')) return new Response(null, { status: 403 })
+// Perform the authorized operation here.
+```
+
 ### Customize callback failures
 
 Pass `onError({ reason, request })` to `handleCallbackRoute` to return a custom response. It takes precedence over `errorRedirectUrl`. A provider cancellation is `access_denied`, and a missing verifier (for example after its cookie expires) is `sign_in_expired`. Other reasons are `invalid_callback`, `invalid_state`, `provider_error`, `token_exchange_failed`, and `session_failed`. The middleware still clears the failed flow's verifier. A rejection by your own `allowSession` policy takes its separate 403 path.
@@ -202,7 +225,20 @@ GET: handleCallbackRoute({
 })
 ```
 
-On that page, import `authErrorMessage` from `@lpshanley/oidc-start-react`. Read `auth_error` from the route's search parameters and render `<p role="alert">{authErrorMessage(auth_error)}</p>` when the parameter is present. The helper selects fixed messages and gives unknown values a generic retry message. Host access denials keep their 403 response.
+On the login page, read `auth_error` with `Route.useSearch()`. When the parameter is present, render `<p role="alert">{authErrorMessage(auth_error)}</p>` using `authErrorMessage` from `@lpshanley/oidc-start-react`. Unknown values receive a generic retry message. Host access denials keep their 403 response.
+
+Keep the message visible until the user chooses **Dismiss**. Inside the login component, bind `const navigate = Route.useNavigate()` and use this click handler. It removes only the error parameter, preserves the fragment and replaces the current history entry so Back returns to the preceding page.
+
+```tsx
+<button onClick={() => navigate({
+  search: previous => ({ ...previous, auth_error: undefined }),
+  hash: true,
+  replace: true,
+  resetScroll: false,
+})}>Dismiss</button>
+```
+
+The working example wires the callback to the login page and includes the route's search validation. [Callback](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/callback.ts) · [Dismissible login error](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/routes/login.tsx)
 
 ### Require a recent login
 

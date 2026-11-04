@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { completeProviderSignIn } from "./sign-in.mjs";
 
 test("the signOut RPC navigates the document through provider logout", async ({ page, context, baseURL }) => {
 	await context.route((url) => !["localhost", "127.0.0.1"].includes(url.hostname), (route) => route.abort());
@@ -7,10 +8,7 @@ test("the signOut RPC navigates the document through provider logout", async ({ 
 	// The SSR button is visible while Vite is still loading the client entry.
 	await page.goto("/", { waitUntil: "networkidle" });
 	await signIn.click();
-	await page.getByPlaceholder("Enter any login").fill("tester");
-	await page.locator('input[name="password"]').fill("local-test-only");
-	await page.getByRole("button", { name: "Sign-in", exact: true }).click();
-	await page.getByRole("button", { name: "Continue", exact: true }).click();
+	await completeProviderSignIn(page, "tester");
 	await expect(identity).toBeVisible();
 	// The root loader supplies the account on the first render, before hydration.
 	const ssr = await page.request.get("/");

@@ -1,5 +1,13 @@
 # @lpshanley/oidc-start-react
 
+## 0.4.1
+
+### Patch Changes
+
+- a382d19: Show how to compose requireAuth and hasRole for admin navigation and enforce the same role in a private endpoint.
+- c7c9ed7: Show how to display a callback error and dismiss it while preserving the rest of the URL and browser history.
+- Update the paired core dependency to `@lpshanley/oidc-start-core@0.4.1`.
+
 ## 0.4.0
 
 ### Minor Changes
