@@ -71,22 +71,14 @@ Run `pnpm --filter oidc-start-example dev` after verification to try the example
 
 Changesets versions the two public packages together. Add a changeset for a user-facing change. For subsequent releases, use `pnpm changeset pre enter next` to enter the prerelease cycle, `pnpm version-packages` to apply changesets, and `pnpm changeset pre exit` before versioning for stable. Review and commit the manifest, lockfile and Changesets updates together. The release tag must match both package versions.
 
-**Before the first public release**, run the [Release to npm workflow](.github/workflows/release.yml) manually on `main`. It installs the two release archives in a clean example app and tests them in Chromium against a local OIDC issuer, in development and production. The test signs in, reloads, follows the sign-out button through provider logout, and checks that replaying the original cookie leaves the app signed out. A passing manual run uploads the tested `npm-tarballs-*` artifact for review.
+**To rehearse a release**, run the [Release to npm workflow](.github/workflows/release.yml) manually on `main`. It installs the two release archives in a clean example app and tests them in Chromium against a local OIDC issuer, in development and production. The test signs in, reloads, follows the sign-out button through provider logout, and checks that replaying the original cookie leaves the app signed out. A passing manual run uploads the tested `npm-tarballs-*` artifact for review.
 
 To repeat the browser check locally, extract that artifact, run `pnpm --filter oidc-start-example exec playwright install chromium`, then run `bash scripts/check-packed-browser.sh /path/to/extracted/artifact` from the matching checkout.
 
-**One-time setup**
+**One-time setup.** Require `verify` on `main` and restrict creation, updates and deletion of `v*` tags to release maintainers. The workflow accepts protected release tags on commits reachable from `main`. Set the GitHub `npm` environment to accept only matching tags. Approval takes place on npm.
 
-1. On GitHub, require the `verify` check on `main`. Create an active tag ruleset for `v*` that restricts creation, updates and deletion to release maintainers. Create the `npm` environment, limit deployments to release tags matching `v*`, and configure release approval there. The release workflow checks that the tag is protected and its commit is on `main`.
-2. For the initial `0.1.0-next.0`, sign in to npm with an account that controls the `@lpshanley` scope and has 2FA. From the extracted, verified artifact, run these in order:
+In the trusted publisher settings of **both** npm packages, choose GitHub Actions, owner `lpshanley`, repository `oidc-start`, workflow filename `release.yml`, and environment `npm`. Leave direct `npm publish` and dist-tag management unchecked; the workflow only needs `npm stage publish`. Configure trust close to the next release, since npm gives new configurations two days to complete their first successful publish. [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
 
-   ```sh
-   npm publish ./lpshanley-oidc-start-core-0.1.0-next.0.tgz --access public --tag next --ignore-scripts
-   npm publish ./lpshanley-oidc-start-react-0.1.0-next.0.tgz --access public --tag next --ignore-scripts
-   ```
+**To release**, push an annotated `vX.Y.Z-next.N` or `vX.Y.Z` tag for the reviewed version on `main`. After the packed browser check passes, two independent GitHub jobs stage the tested archives with the `next` or `latest` dist-tag, respectively for prerelease and stable versions. On npmjs.com, open **Staged Packages**, verify the package names, versions and tags against the run, then approve **core first** and **React second** with 2FA. Each approval makes that package public. [npm staged publishing](https://docs.npmjs.com/staged-publishing/)
 
-3. On **each** npm package, add a GitHub Actions trusted publisher for owner `lpshanley`, repository `oidc-start`, workflow filename `release.yml`, and environment `npm`. Enable direct `npm publish`. Configure trust when the next unpublished release is ready: npm currently requires a first successful workflow publish within two days of creating the configuration. The public repository and GitHub-hosted runner enable automatic npm provenance for CI publications. [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
-
-**Subsequent releases** start by pushing an annotated `vX.Y.Z-next.N` or `vX.Y.Z` tag for the reviewed version on `main`. The workflow runs `pnpm verify`, packs both packages and checks the version and the adapter's dependency on core. The `npm` job publishes those exact artifacts, core first, with the `next` or `latest` dist-tag respectively. Only that job has OIDC publishing permission.
-
-If a publish fails partway through, use **Re-run failed jobs** on the same workflow run so the publisher gets the same tarballs. It skips an existing version only if npm reports the same SHA-512 digest. A digest mismatch requires investigating the existing publication before cutting another version.
+If only one staging job fails, use **Re-run failed jobs** on the same run. If npm already has the version pending, review that existing stage and compare its downloaded tarball with the SHA-512 digest in CI before approving it. The workflow skips an already-public version only when its digest matches. Investigate any mismatch before proceeding.

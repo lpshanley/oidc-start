@@ -4,9 +4,10 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const [mode, tag, directory] = process.argv.slice(2);
-assert.ok(["check", "publish"].includes(mode) && tag && directory,
-	"Usage: node scripts/npm-release.mjs <check|publish> <vX.Y.Z[-next.N]> <tarball-directory>");
+const [mode, tag, directory, selected] = process.argv.slice(2);
+assert.ok(["check", "stage"].includes(mode) && tag && directory,
+	"Usage: node scripts/npm-release.mjs <check|stage> <vX.Y.Z[-next.N]> <tarball-directory> [core|react]");
+if (mode === "stage") assert.ok(["core", "react"].includes(selected), "Select one package to stage");
 assert.match(tag, /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.(0|[1-9]\d*))?$/);
 const version = tag.slice(1);
 const distTag = version.includes("-next.") ? "next" : "latest";
@@ -25,16 +26,17 @@ const packages = ["core", "react"].map((part) => {
 	if (part === "react") assert.equal(manifest.dependencies["@lpshanley/oidc-start-core"], version);
 	const integrity = "sha512-" + createHash("sha512").update(readFileSync(file)).digest("base64");
 	console.log(`${name}@${version} (${distTag}) ${integrity}`);
-	return { name, file, integrity };
+	return { part, name, file, integrity };
 });
 
-if (mode === "publish") {
-	// Check both before publishing either. On retry, skip only byte-identical versions.
-	const remaining = [];
+if (mode === "stage") {
+	// Both archives must match the tag. Each CI job stages one so failed jobs
+	// can retry without submitting a sibling that is already awaiting approval.
+	let archive;
 	for (const pkg of packages) {
 		const response = await fetch(`${registry}/${encodeURIComponent(pkg.name)}/${version}`);
 		if (response.status === 404) {
-			remaining.push(pkg);
+			if (pkg.part === selected) archive = pkg.file;
 			continue;
 		}
 		if (!response.ok) throw new Error(`Registry lookup for ${pkg.name} returned HTTP ${response.status}`);
@@ -42,7 +44,10 @@ if (mode === "publish") {
 		assert.equal(published.dist?.integrity, pkg.integrity, `${pkg.name}@${version} already exists with different bytes`);
 		console.log(`Already published: ${pkg.name}@${version}`);
 	}
-	for (const { file } of remaining) {
-		execFileSync("npm", ["publish", file, "--registry", registry, "--access", "public", "--tag", distTag, "--ignore-scripts"], { stdio: "inherit" });
+	if (archive) {
+		execFileSync("npm", [
+			"stage", "publish", archive, "--registry", registry,
+			"--access", "public", "--tag", distTag, "--ignore-scripts",
+		], { stdio: "inherit" });
 	}
 }
