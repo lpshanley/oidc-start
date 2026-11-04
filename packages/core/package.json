@@ -1,6 +1,11 @@
 {
   "name": "@lpshanley/oidc-start-core",
   "version": "0.1.0-next.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lpshanley/oidc-start.git",
+    "directory": "packages/core"
+  },
   "description": "OpenID Connect sign-in, grants and sessions for Node.js",
   "type": "module",
   "sideEffects": false,

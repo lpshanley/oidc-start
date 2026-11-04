@@ -1,6 +1,11 @@
 {
   "name": "@lpshanley/oidc-start-react",
   "version": "0.1.0-next.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lpshanley/oidc-start.git",
+    "directory": "packages/react"
+  },
   "description": "TanStack Start for React bindings for OpenID Connect",
   "type": "module",
   "sideEffects": false,
