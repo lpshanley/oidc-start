@@ -401,6 +401,85 @@ test("still signs out when the provider cannot revoke the refresh token", async 
 		expect.objectContaining({ operation: "token-revocation" }),
 	);
 });
+
+test("ends the sessions a verified back-channel logout token names", async () => {
+	const onError = vi.fn();
+	const auth = createOidcCore({
+		allowSession,
+		revocations,
+		environment: () => env,
+		onError,
+	});
+	const post = (body: string) =>
+		new Request("https://internal:3000/auth/backchannel-logout", {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body,
+		});
+
+	// No token at all, and a token that fails verification (no JWKS published here).
+	expect(await auth.backchannelLogout(post(""))).toEqual({ status: 400 });
+	expect(await auth.backchannelLogout(post("logout_token=bad"))).toEqual({
+		status: 400,
+	});
+	expect(onError).toHaveBeenCalledWith(
+		expect.objectContaining({ operation: "backchannel-logout" }),
+	);
+	expect(revocations.revokeIdpSession).not.toHaveBeenCalled();
+});
+
+test.each([
+	false,
+	true,
+])("back-channel logout reports persistence failure=%s", async (fails) => {
+	const { exportJWK, generateKeyPair, SignJWT } = await import("jose");
+	const { privateKey, publicKey } = await generateKeyPair("RS256");
+	const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256" };
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async () => Response.json({ keys: [jwk] })),
+	);
+	Object.assign(oidc.metadata, {
+		issuer: env.OIDC_ISSUER,
+		jwks_uri: "https://idp.test/jwks/",
+	});
+	const token = await new SignJWT({
+		sub: "alice",
+		sid: "idp-1",
+		events: { "http://schemas.openid.net/event/backchannel-logout": {} },
+	})
+		.setProtectedHeader({ alg: "RS256", kid: "k1" })
+		.setIssuer(env.OIDC_ISSUER)
+		.setAudience(env.OIDC_CLIENT_ID)
+		.setIssuedAt()
+		.sign(privateKey);
+
+	if (fails)
+		revocations.revokeIdpSession.mockRejectedValueOnce(
+			new Error("database unavailable"),
+		);
+	const auth = createOidcCore({
+		allowSession,
+		revocations,
+		environment: () => env,
+		onError: vi.fn(),
+	});
+	const result = await auth.backchannelLogout(
+		new Request("https://internal:3000/auth/backchannel-logout", {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({ logout_token: token }),
+		}),
+	);
+
+	expect(result).toEqual({ status: fails ? 503 : 200 });
+	expect(revocations.revokeIdpSession).toHaveBeenCalledWith(
+		"idp-1",
+		expect.any(Number),
+	);
+	vi.unstubAllGlobals();
+});
+
 test.each([
 	false,
 	true,

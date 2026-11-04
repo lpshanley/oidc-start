@@ -1,3 +1,4 @@
+import { errors } from "jose";
 import { randomNonce, randomPKCECodeVerifier } from "openid-client";
 import {
 	assertOidcConfigured,
@@ -14,6 +15,7 @@ import {
 	parseCookies,
 	serializeCookie,
 } from "./cookies.js";
+import { type LogoutTarget, LogoutTokenError } from "./logout-token.js";
 import { type AuthUser, sanitizeReturnPath } from "./models.js";
 import {
 	createProvider,
@@ -353,6 +355,50 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				onError({ operation: "end-session", error, context });
 			}
 			return { location, setCookies: sessions.clear(cookies) };
+		},
+
+		/**
+		 * Handles a provider's back-channel logout: verifies the posted
+		 * logout_token and ends the sessions it names. Answers 400 for an
+		 * invalid token and 503 when the provider's keys or the revocation
+		 * store cannot be reached, so the provider can retry.
+		 */
+		async backchannelLogout(
+			request: Request,
+			context?: OidcCallContext,
+		): Promise<{ status: 200 | 400 | 503 }> {
+			const form = await request.formData().catch(() => undefined);
+			const token = form?.get("logout_token");
+			if (typeof token !== "string" || token.length === 0) {
+				return { status: 400 };
+			}
+			let target: LogoutTarget;
+			try {
+				target = await withinDeadline(
+					provider().verifyLogoutToken(token, context),
+					context,
+				);
+			} catch (error) {
+				onError({ operation: "backchannel-logout", error, context });
+				const invalid =
+					error instanceof LogoutTokenError ||
+					(error instanceof errors.JOSEError &&
+						!(error instanceof errors.JWKSTimeout));
+				return { status: invalid ? 400 : 503 };
+			}
+			const now = Math.floor(Date.now() / 1000);
+			try {
+				if ("sid" in target) {
+					await options.revocations.revokeIdpSession(
+						target.sid,
+						now + settings.sessionMaxAgeSeconds,
+					);
+				} else await options.revocations.revokeAllFor(target.sub, now);
+			} catch (error) {
+				onError({ operation: "backchannel-logout", error, context });
+				return { status: 503 };
+			}
+			return { status: 200 };
 		},
 
 		/** Reports a failure through the configured `onError`. */

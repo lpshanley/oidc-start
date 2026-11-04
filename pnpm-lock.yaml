@@ -170,6 +170,9 @@ catalogs:
     iron-webcrypto:
       specifier: 2.0.0
       version: 2.0.0
+    jose:
+      specifier: 6.2.14
+      version: 6.2.14
     openid-client:
       specifier: 6.8.8
       version: 6.8.8
@@ -202,6 +205,9 @@ importers:
       iron-webcrypto:
         specifier: 'catalog:'
         version: 2.0.0
+      jose:
+        specifier: 'catalog:'
+        version: 6.2.14
       openid-client:
         specifier: 'catalog:'
         version: 6.8.8

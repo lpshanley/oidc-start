@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "iron-webcrypto": "catalog:",
+    "jose": "catalog:",
     "openid-client": "catalog:",
     "zod": "catalog:"
   },

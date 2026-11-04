@@ -292,6 +292,63 @@ test("re-reads roles on refresh, from the ID token or else userinfo", async () =
 	).resolves.toMatchObject({ roles: [] });
 });
 
+describe("back-channel logout tokens", () => {
+	const issuer = "https://idp.test/application/o/sage/";
+	const event = { "http://schemas.openid.net/event/backchannel-logout": {} };
+
+	async function signer() {
+		const { exportJWK, generateKeyPair, SignJWT } = await import("jose");
+		const { privateKey, publicKey } = await generateKeyPair("RS256");
+		const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256" };
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		Object.assign(oidc.metadata, {
+			issuer,
+			jwks_uri: "https://idp.test/jwks/",
+		});
+		return (claims: Record<string, unknown>, audience = "sage-web") =>
+			new SignJWT(claims)
+				.setProtectedHeader({ alg: "RS256", kid: "k1", typ: "logout+jwt" })
+				.setIssuer(issuer)
+				.setAudience(audience)
+				.setIssuedAt()
+				.sign(privateKey);
+	}
+
+	test("accepts a signed token for this client and names its session or user", async () => {
+		vi.useRealTimers();
+		const sign = await signer();
+		const provider = createProvider(settings);
+
+		await expect(
+			provider.verifyLogoutToken(
+				await sign({ sub: "alice", sid: "idp-1", events: event }),
+			),
+		).resolves.toEqual({ sid: "idp-1" });
+		await expect(
+			provider.verifyLogoutToken(await sign({ sub: "alice", events: event })),
+		).resolves.toEqual({ sub: "alice" });
+		vi.unstubAllGlobals();
+	});
+
+	test("rejects another client's token, a missing event, or a nonce", async () => {
+		vi.useRealTimers();
+		const sign = await signer();
+		const provider = createProvider(settings);
+
+		for (const token of [
+			await sign({ sub: "alice", events: event }, "other-client"),
+			await sign({ sub: "alice" }),
+			await sign({ sub: "alice", events: event, nonce: "n" }),
+		]) {
+			await expect(provider.verifyLogoutToken(token)).rejects.toThrow();
+		}
+		vi.unstubAllGlobals();
+	});
+});
+
 test("the cached provider transport uses each caller's remaining budget", async () => {
 	const provider = createProvider(settings);
 	const fetch = vi.fn(async () => new Response());

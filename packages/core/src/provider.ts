@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createRemoteJWKSet, jwtVerify, customFetch as jwksFetch } from "jose";
 import * as client from "openid-client";
 import type { OidcCallContext, OidcConfiguration } from "./config.js";
+import { LogoutTokenError, logoutTarget } from "./logout-token.js";
 import type { AuthUser } from "./models.js";
 
 // OpenID Connect operations over openid-client, standing in for the WorkOS
@@ -116,6 +118,7 @@ export function createProvider(
 		});
 	};
 	let configuration: Promise<client.Configuration> | null = null;
+	let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
 	function discover() {
 		configuration ??= (async () => {
@@ -254,6 +257,28 @@ export function createProvider(
 			return { ...tokenSet(response, refreshToken), roles };
 		},
 
+		/**
+		 * Verifies a back-channel logout token's signature against the provider's
+		 * published keys, its issuer, audience, and age, then its logout claims.
+		 * Throws LogoutTokenError or a jose error for an invalid token.
+		 */
+		async verifyLogoutToken(token: string) {
+			const metadata = (await discover()).serverMetadata();
+			if (!metadata.jwks_uri) {
+				throw new LogoutTokenError("The provider publishes no jwks_uri");
+			}
+			jwks ??= createRemoteJWKSet(new URL(metadata.jwks_uri), {
+				timeoutDuration: timeoutMs,
+				[jwksFetch]: boundedFetch,
+			});
+			const { payload } = await jwtVerify(token, jwks, {
+				issuer: metadata.issuer,
+				audience: settings.OIDC_CLIENT_ID,
+				maxTokenAge: "10 minutes",
+			});
+			return logoutTarget(payload);
+		},
+
 		/** Revokes a refresh token at the provider, so it cannot mint new tokens. */
 		async revokeRefreshToken(refreshToken: string) {
 			await client.tokenRevocation(await discover(), refreshToken, {
@@ -292,6 +317,8 @@ export function createProvider(
 		) => transport.run(context, () => api.exchangeCode(url, checks)),
 		refresh: (token: string, subject: string, context?: OidcCallContext) =>
 			transport.run(context, () => api.refresh(token, subject)),
+		verifyLogoutToken: (token: string, context?: OidcCallContext) =>
+			transport.run(context, () => api.verifyLogoutToken(token)),
 		revokeRefreshToken: (token: string, context?: OidcCallContext) =>
 			transport.run(context, () => api.revokeRefreshToken(token)),
 		endSessionUrl: (
