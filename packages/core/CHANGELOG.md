@@ -1,5 +1,14 @@
 # @lpshanley/oidc-start-core
 
+## 0.4.2
+
+### Patch Changes
+
+- e78757b: Require the host access policy to return or resolve to `true` when issuing, reading, or refreshing a session.
+- 36f2974: Bind sign-in and grant callbacks to the initiating browser's sealed verifier cookie. Flows started before the upgrade must be restarted.
+- b8e654d: Check request deadlines before starting provider work, preventing an unhandled rejection when a deadline has already passed.
+- 062f0a2: Scale last-seen cookie updates to the configured idle timeout so active sessions with short timeouts stay signed in.
+
 ## 0.4.1
 
 Versioned together with the React adapter's cookbook updates.

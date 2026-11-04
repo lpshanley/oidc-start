@@ -1,5 +1,11 @@
 # @lpshanley/oidc-start-react
 
+## 0.4.2
+
+### Patch Changes
+
+- Update the paired core dependency to `@lpshanley/oidc-start-core@0.4.2` for the callback, session policy, deadline, and idle-timeout fixes.
+
 ## 0.4.1
 
 ### Patch Changes
