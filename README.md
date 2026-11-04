@@ -25,3 +25,15 @@ pnpm verify
 ```
 
 Turbo builds core before the adapter. Verification typechecks both packages, runs the in-process auth tests and checks the distributable packages with publint.
+
+## Releases
+
+The root is private. Changesets versions the two public packages together. Run `pnpm changeset` with a user-facing change and `pnpm version-packages` when preparing a release. Before publishing, run verification and install both tarballs in a separate consumer:
+
+```sh
+mkdir -p /tmp/oidc-packs
+pnpm --filter @lpshanley/oidc-start-core pack --pack-destination /tmp/oidc-packs
+pnpm --filter @lpshanley/oidc-start-react pack --pack-destination /tmp/oidc-packs
+```
+
+Check the consumer's dev and production builds, including a browser call to `getAuth`, sign-in, refresh and logout. Publish an approved prerelease with the `next` dist-tag under the `@lpshanley` scope.
