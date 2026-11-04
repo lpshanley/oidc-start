@@ -14,7 +14,7 @@ function Home() {
 			{user ? (
 				<>
 					<p>Signed in as {displayName(user)}.</p>
-					<button onClick={signOut}>Sign out</button>
+					<button onClick={() => signOut()}>Sign out</button>
 				</>
 			) : (
 				<button onClick={() => signIn()}>Sign in</button>

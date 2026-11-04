@@ -21,7 +21,7 @@ Register a confidential web client with your OIDC provider. If your app runs at 
 | Sign-in redirect URI | `http://localhost:5173/callback` |
 | Post-logout redirect URI | `http://localhost:5173/` |
 
-Set these values in your **server environment**. Generate `SESSION_SECRET` once with `openssl rand -hex 32` and reuse it across server instances. Your provider must supply the account’s email in the ID token or through UserInfo.
+Set these values in your **server environment**. Generate `SESSION_SECRET` once with `openssl rand -hex 32` and reuse it across server instances. Email is optional. Use `displayName(user)` for a name, email, or neutral account label.
 
 ```dotenv
 APP_ORIGIN=http://localhost:5173
@@ -32,7 +32,7 @@ OIDC_CLIENT_SECRET=your-client-secret
 SESSION_SECRET=
 ```
 
-Import `createOidcCore` and the `SessionRevocations` type from `@lpshanley/oidc-start-react/server` in your server module. For local development, copy the example’s `auth.server.ts` into `src/auth.server.ts`. It exports an `auth` instance configured with `callbackPath: '/callback'` and `postLogoutPath: '/'`. The example admits any authenticated user and keeps revocations in memory. For deployment, set `allowSession` to your access policy and use a durable revocation store shared by all instances. [Copy auth.server.ts](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/auth.server.ts) · [Core configuration and storage](https://www.npmjs.com/package/@lpshanley/oidc-start-core)
+Import `createOidcCore` and the `SessionRegistry` type from `@lpshanley/oidc-start-react/server` in your server module. For local development, copy the example’s `auth.server.ts` into `src/auth.server.ts`. It exports an `auth` instance configured with `callbackPath: '/callback'` and `postLogoutPath: '/'`. The example admits any authenticated user and keeps active sessions in memory. For deployment, set `allowSession` to your access policy and use a durable session registry shared by all instances. [Copy auth.server.ts](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/auth.server.ts) · [Core configuration and storage](https://www.npmjs.com/package/@lpshanley/oidc-start-core)
 
 ## 2. Register the request middleware
 
@@ -114,7 +114,7 @@ function Home() {
 }
 ```
 
-Call `signOut()` for the current session or `signOut({ everywhere: true })` for all of this user's sessions in this app. Both use the same CSRF-protected POST server function. If the revocation store is unavailable, the server returns 503 so the user can retry.
+Call `signOut()` for the current session or `signOut({ everywhere: true })` for all of this user's sessions in this app. Use `signOut({ providerLogout: false })` to end only the application session. These options use the same CSRF-protected POST server function. If the session registry is unavailable, the server returns 503 so the user can retry.
 
 Use `useAuth().hasRole('admin')` to show role-specific UI. It returns false for signed-out users and sessions without a roles claim. Check authorization again in the server handler that reads private data or performs the action.
 
@@ -255,3 +255,7 @@ A guest or stale session is sent to the local sign-in endpoint with the same `ma
 Inside the server handler for a sensitive action, call `checkRecentAuth({ maxAge: 300 })` from `@lpshanley/oidc-start-react/server` before performing the action. If `isStale` is true, stop the mutation and offer `signIn({ maxAge: 300, returnPathname: '/settings' })`. Check again when the user submits the action after returning. Pick the maximum age in the server's policy.
 
 The age is in seconds and comes from the provider's ID-token `auth_time`. Signed-out users, existing sessions without that claim, and expired authentication all require sign-in. Token refresh preserves the original authentication time. A sign-in with `maxAge: 0` requests fresh authentication.
+
+## Upgrading to 0.5
+
+See the [migration guide](https://github.com/lpshanley/oidc-start/blob/main/docs/migration-0.5.md). `getAuth` and guards distinguish absent sessions from denied admission (403) and temporary authentication outages (503); only an absent session starts automatic sign-in. User email is optional and issuer identity is explicit.

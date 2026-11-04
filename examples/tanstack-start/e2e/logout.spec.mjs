@@ -33,3 +33,23 @@ test("the signOut RPC navigates the document through provider logout", async ({ 
 	await page.reload();
 	await expect(signIn).toBeVisible();
 });
+
+test("provider-initiated logout ends the application session and permits another login", async ({ page, context, baseURL }, info) => {
+  await page.goto("/account");
+  await completeProviderSignIn(page, "tester");
+  await expect(page.getByText("Account for", { exact: false })).toBeVisible();
+  const original = (await context.cookies(baseURL)).filter(c => c.name.includes("example_session"));
+  const end = new URL("http://localhost:19867/session/end");
+  end.searchParams.set("client_id", "roundtrip-" + info.project.name);
+  end.searchParams.set("post_logout_redirect_uri", baseURL + "/");
+  await page.goto(end.href);
+  await page.getByRole("button", { name: "Yes, sign me out" }).click();
+  await expect(page).toHaveURL(baseURL + "/");
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+  await context.addCookies(original);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+  await page.goto("/account");
+  await completeProviderSignIn(page, "tester");
+  await expect(page.getByText("Account for", { exact: false })).toBeVisible();
+});

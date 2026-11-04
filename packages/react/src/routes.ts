@@ -1,3 +1,4 @@
+import type { SignOutOptions } from "@lpshanley/oidc-start-core/models";
 // Server route handler factories, after WorkOS's handleCallbackRoute. They run
 // behind oidcMiddleware, which applies the cookies they queue.
 
@@ -36,9 +37,9 @@ export function handleBackchannelLogoutRoute(): RouteHandler {
 }
 
 /** POST: clears the session and redirects to the provider logout. */
-export function handleSignOutRoute(): RouteHandler {
+export function handleSignOutRoute(options: SignOutOptions = {}): RouteHandler {
 	return async ({ request }) => {
 		const { signOutRoute } = await import("./routes.server.js");
-		return signOutRoute(request);
+		return signOutRoute(request, options);
 	};
 }

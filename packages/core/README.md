@@ -1,117 +1,75 @@
 # @lpshanley/oidc-start-core
 
-OpenID Connect sign-in for Node.js servers. Give the core a standard `Request` and it handles provider discovery, the authorization code exchange with PKCE, and sealed session cookies. Your app decides who can sign in and where to record revoked sessions.
+OpenID Connect sign-in for Node.js servers. The core handles discovery, authorization code exchange with PKCE, browser flow binding, sealed session cookies, refresh coordination and provider logout. Applications supply shared session storage and their own authorization policy.
 
-Building a TanStack Start app? The React adapter connects the core to Start’s request middleware, routes, and server functions. [TanStack Start quickstart](https://www.npmjs.com/package/@lpshanley/oidc-start-react)
+For TanStack Start use `@lpshanley/oidc-start-react`. See the [production guide](https://github.com/lpshanley/oidc-start/blob/main/docs/production.md), [PostgreSQL example](https://github.com/lpshanley/oidc-start/tree/main/examples/postgres), and [0.5 migration guide](https://github.com/lpshanley/oidc-start/blob/main/docs/migration-0.5.md).
 
-For multi-replica deployment, see the [production guide](https://github.com/lpshanley/oidc-start/blob/main/docs/production.md) and [tested PostgreSQL example](https://github.com/lpshanley/oidc-start/tree/main/examples/postgres).
+## Configuration
 
-## Install and register your app
+Use Node.js 22.12 or newer, ES modules, and a confidential authorization-code client. Register exact sign-in and post-logout URLs at the provider. Use HTTPS in production.
 
-Use Node.js 22.12 or newer with ES modules. Install the package from npm.
-
-```sh
-npm install @lpshanley/oidc-start-core
-```
-
-Register a **confidential web client** with your OIDC provider. For the example below, register `http://localhost:5173/callback` as the sign-in redirect URI and `http://localhost:5173/` as the post-logout redirect URI. In production, use your app’s public HTTPS origin for both.
-
-| Server setting | What to supply |
+| Setting | Purpose |
 | --- | --- |
-| `APP_ORIGIN` | The public origin of your app, such as `http://localhost:5173` in development. |
-| `OIDC_ISSUER` | The provider’s issuer URL, including its tenant path if it has one. |
-| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | The credentials issued to your web client. |
-| `SESSION_SECRET` | Generate once with `openssl rand -hex 32`. Keep the same secret across restarts and server instances. |
-| `OIDC_SCOPES` | Optional. Defaults to `openid profile email offline_access`. The provider must supply an email in the ID token or through UserInfo. |
-| `OIDC_ROLES_CLAIM` | Optional. Defaults to `roles`. If the ID token omits this claim, the core checks UserInfo when the provider advertises it. Without either source, your policy receives an empty role list. |
-
-## Create the core
-
-Create one instance in a server module. This example requires the `members` role, so give your test user that role at the provider. The core checks the policy at sign-in, when reading a session, and after refreshing it.
+| `APP_ORIGIN` | Canonical public origin, such as `https://app.example.com`. |
+| `OIDC_ISSUER` | Exact discovery issuer, including tenant path and trailing slash when applicable. |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Registered confidential client credentials. |
+| `SESSION_SECRET` | Persistent sealing secret, at least 32 characters, shared by every replica. |
+| `OIDC_SCOPES` | Defaults to `openid profile email offline_access`. Email remains optional. |
+| `OIDC_ROLES_CLAIM` | Defaults to `roles`; absent roles become an empty list. |
 
 ```ts
-// auth.server.ts
 import { createOidcCore } from '@lpshanley/oidc-start-core'
 import { hasRole } from '@lpshanley/oidc-start-core/models'
-import { revocations } from './revocations.js'
+import { registry, refreshCoordinator } from './sessions.js'
 
 export const auth = createOidcCore({
   cookiePrefix: 'myapp',
   callbackPath: '/callback',
   postLogoutPath: '/',
+  registry,
+  refreshCoordinator,
   allowSession: user => hasRole(user, 'members'),
-  revocations,
 })
-
 auth.assertConfigured()
 ```
 
-`./revocations.js` is an app module you supply. For a local trial, copy the three maps and the `revocations` object from the example into `revocations.ts` and export the object. A deployed app needs durable storage shared by every instance. [Local revocation store](https://github.com/lpshanley/oidc-start/blob/main/examples/tanstack-start/src/auth.server.ts)
+`allowSession` is optional; omitted, it admits authenticated users. A provided policy runs on session reads and renewed claims. The default browser lifetime is 14 days absolute and 12 hours idle, configurable with `sessionMaxAgeSeconds` and `sessionIdleSeconds`.
 
-## Wire sign-in and callback
+`offlineAccessConsent` defaults to `prompt`: requesting offline access includes `prompt=consent`. Use `preauthorized` only with an established host/provider basis. Standard prompt combinations are supported; `none` is exclusive and incompatible with an offline consent request that has not been preauthorized. An automatic sign-in may still require provider interaction.
 
-Mount these handlers at `GET /sign-in` and `GET /callback` in your server. The first sends the browser to the provider. The second checks the code and browser verifier, sets the session cookie, and returns the user to `/`.
+## Browser requests
 
-```ts
-import { SessionAccessDeniedError } from '@lpshanley/oidc-start-core'
-import { isAuthorizationDenied } from '@lpshanley/oidc-start-core/provider'
-import { auth } from './auth.server.js'
+- `auth.resolve(request, context?)` returns cookies, session, `setCookies`, and an authentication status. Only `anonymous` should trigger automatic sign-in. Treat `denied` as 403 and `unavailable` as a retryable 503. Preserve the returned cookie behavior.
+- `auth.signIn(request, cookies, options?, context?)` returns the provider URL and verifier cookies. Options include local `returnPathname`, `loginHint`, `prompt`, and `maxAge`.
+- `auth.callback(request, cookies, context?)` validates the response, registers a fresh session, and returns either a redirect location or a bounded failure reason. A failed callback is terminal; do not automatically restart it.
+- `auth.signOut(request, cookies, session, context?, options?)` ends local registry entries before clearing cookies. `options.everywhere` ends this application's existing sessions for the subject. `options.providerLogout` defaults to true; false performs local logout. Use a CSRF-protected POST and a 303 redirect. A storage failure must not be reported as successful logout.
 
-function authHeaders(cookies: string[]) {
-  const headers = new Headers({ 'Cache-Control': 'no-store' })
-  for (const cookie of cookies) headers.append('Set-Cookie', cookie)
-  return headers
-}
+Forward every `Set-Cookie` separately, including on redirects and error responses. Full sessions contain provider tokens and must stay server-side. `AuthUser` includes issuer and subject, with optional email; browser-safe models and display helpers are exported from `/models`.
 
-export async function signIn(request: Request) {
-  const { cookies, setCookies } = await auth.resolve(request)
-  const flow = await auth.signIn(request, cookies, '/')
-  const headers = authHeaders([...setCookies, ...flow.setCookies])
-  headers.set('Location', flow.url)
-  return new Response(null, { status: 302, headers })
-}
+## Active-session registry
 
-export async function callback(request: Request) {
-  const { cookies, setCookies } = await auth.resolve(request)
-  const result = await auth.callback(request, cookies)
-  const headers = authHeaders([...setCookies, ...result.setCookies])
-  if (!result.ok) {
-    if (isAuthorizationDenied(result.error)) {
-      return new Response('Authorization was declined.', { status: 403, headers })
-    }
-    const denied = result.error instanceof SessionAccessDeniedError
-    return new Response(denied ? 'Access denied.' : 'Please sign in again.', {
-      status: denied ? 403 : 400, headers,
-    })
-  }
-  headers.set('Location', result.location)
-  return new Response(null, { status: 302, headers })
-}
-```
+Implement `SessionRegistry` with shared, durable, read-after-write consistent storage. Every method is scoped by issuer and client ID. All expiry times use epoch seconds.
 
-On an ordinary request, `const { session, setCookies } = await auth.resolve(request)` gives you `session?.user`. Forward **each** returned `Set-Cookie` header separately, even on a signed-out response. A read can refresh a session or clear an expired cookie. Keep the full session on the server because it contains provider tokens. Browser code can use `AuthUser`, `displayName`, and `hasRole` from `@lpshanley/oidc-start-core/models`.
-
-If you use `provider.exchangeCode()` directly, import `isAuthorizationDenied` from `@lpshanley/oidc-start-core/provider` and pass it the caught error. It recognizes the provider’s `access_denied` response across bundles. Other responses, such as `login_required`, and network failures return `false`.
-
-## End a session
-
-For browser sign-out, use a same-origin, CSRF-protected POST handler. Resolve the request, pass its `cookies` and `session` to `auth.signOut(request, cookies, session)`, append both sets of cookies as above, and redirect with **303** to the returned `location`. If recording the revocation throws, return a retryable error. The default session lasts up to 14 days and expires after 12 hours of inactivity.
-
-Implement these four methods on your `SessionRevocations` store. All times are in epoch seconds. Let storage errors propagate so the core can distinguish an outage from an active session.
-
-| Method | Storage rule |
+| Method | Responsibility |
 | --- | --- |
-| `revoke(sid, until)` | Mark this app session as revoked through its expiry. |
-| `revokeIdpSession(idpSid, until)` | Mark the provider session as revoked. Atomically keep the later expiry. |
-| `revokeAllFor(sub, cutoff)` | Atomically keep the greatest cutoff for the subject. |
-| `isRevoked({ sid, idpSid, sub, issuedAt })` | Return true for a live revocation of either session ID, or when `issuedAt <= cutoff` for this subject. |
+| `register(record)` | Add a fresh application session with subject, optional provider `idpSid`, and absolute expiry. |
+| `isActive(key)` | Check application session membership and expiry at read time. |
+| `end(key)` | End one application session. |
+| `endAll(subject)` | End the subject's currently registered sessions in this scope. |
+| `applyLogout(event)` | Atomically remember the verified event through expiry and end its current matches. Duplicate events are no-ops. |
 
-For provider-initiated logout, register a POST endpoint and pass its request to `auth.backchannelLogout(request)`. Return the resulting HTTP status to the provider. The core verifies the signed logout token, including its expiry and nonempty token ID. A redelivered event uses the original issue time. [Revocation interface](https://github.com/lpshanley/oidc-start/blob/main/packages/core/src/revocation.ts)
+Serialize registration and logout mutations. Match both subject and provider session when both are supplied. Never use a lasting provider-session ban or a logout timestamp cutoff. A new authorization can reuse the same provider `sid`. Propagate storage errors. Use `createMemorySessionRegistry()` only for local development or tests.
 
-## Obtain a separate provider grant
+For provider logout, mount a POST endpoint accepting `logout_token` and call `auth.backchannelLogout(request)`. Return its 200/400 status and `Cache-Control: no-store`. The signed token authenticates this server-to-server request; it does not use browser CSRF credentials. See the migration guide for the normative validation and response requirements.
 
-Use this flow when your app needs credentials for provider API calls independently of the browser session. Register a second redirect URI with the provider. The default path is `/api/auth/grant-callback`, configurable with `grantCallbackPath`.
+## Refresh coordination
 
-1. Call `auth.startGrant(request, cookies, returnPathname)`, send its cookies, and redirect to its `url`.
-2. In the grant callback, call `auth.finishGrant(request, cookies)` and forward its cookies on success or failure. On success, check the returned user and permissions before storing the tokens on the server.
-3. Call `auth.refreshGrant(refreshToken)` to renew the grant. A `refused` result means the provider rejected it. Other errors propagate. `RefreshNotDispatched` from `@lpshanley/oidc-start-core/provider` means the refresh request was never sent.
+The default coordinator covers one process. Configure the same durable `SessionRefreshCoordinator` on every replica before distributing traffic. `run` returns a ready sealed result, temporary busy state, or a requirement to reauthorize. Reserve before dispatch; never replay an uncertain rotation. A pre-dispatch `RefreshNotDispatched` exception can release the reservation for retry. The PostgreSQL example demonstrates the contract and its integration tests.
+
+## Independent grants
+
+`startGrant`, `finishGrant`, and `refreshGrant` obtain credentials for host-managed provider access independently of browser session storage. Check returned identity and permissions before storing credentials. A refused refresh requires renewed authorization; other failures propagate. The host decides grant lifetime and explicit revocation. Browser-session logout does not automatically revoke independent offline grants.
+
+## Diagnostics
+
+`onError` receives the operation, bounded reason when available, original error, and caller context. Log only bounded operation/reason values and correlation IDs; provider errors can contain credentials. `isAuthorizationDenied` from `/provider` recognizes a provider's `access_denied` response across bundles. Use identity `(issuer, sub)`, never email, for authorization.

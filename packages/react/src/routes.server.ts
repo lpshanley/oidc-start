@@ -2,7 +2,7 @@ import { endSession } from "./sign-out.server.js";
 import { getOidcContext } from "./context.js";
 import type { CallbackErrorReason } from "@lpshanley/oidc-start-core";
 
-import type { SignInOptions } from "@lpshanley/oidc-start-core/models";
+import type { SignInOptions, SignOutOptions } from "@lpshanley/oidc-start-core/models";
 
 type FailureOptions = {
 	/** Where to send the browser when sign-in fails. Defaults to a 400. */
@@ -98,20 +98,20 @@ export async function callbackRoute(
 			},
 		);
 	}
-	context.core.report({ operation: "callback", error: result.error, context: context.call });
+	context.core.report({ operation: "callback", reason: result.reason, error: result.error, context: context.call });
 	if (options.onError) return options.onError({ reason: result.reason, request });
 	return failure(request, options);
 }
 
-export async function signOutRoute(request: Request) {
+export async function signOutRoute(request: Request, options: SignOutOptions = {}) {
 	if (request.method !== "POST") {
 		return new Response("Method Not Allowed", {
 			status: 405,
-			headers: { Allow: "POST" },
+			headers: { Allow: "POST", "Cache-Control": "no-store" },
 		});
 	}
 	const form = await request.formData().catch(() => undefined);
-	const result = await endSession(form?.get("everywhere") === "1");
+	const result = await endSession({ ...options, everywhere: options.everywhere || form?.get("everywhere") === "1" });
 	return result instanceof Response ? result : redirectTo(result, 303);
 }
 
@@ -119,7 +119,7 @@ export async function backchannelLogoutRoute(request: Request) {
 	if (request.method !== "POST") {
 		return new Response("Method Not Allowed", {
 			status: 405,
-			headers: { Allow: "POST" },
+			headers: { Allow: "POST", "Cache-Control": "no-store" },
 		});
 	}
 	const context = getOidcContext();

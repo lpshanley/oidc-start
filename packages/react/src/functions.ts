@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { redirect } from "@tanstack/react-router";
 import { z } from "zod";
-import { sanitizeReturnPath, signInOptionsSchema } from "@lpshanley/oidc-start-core/models";
+import { sanitizeReturnPath, signInOptionsSchema, signOutOptionsSchema } from "@lpshanley/oidc-start-core/models";
 
 // Server functions after WorkOS's server-functions.ts; bodies load lazily so
 // server code stays out of the client bundle.
@@ -57,8 +57,8 @@ export const getSignInUrl = createServerFn({ method: "GET" })
 
 /** Clears the session and redirects to provider logout. In a component, call via useServerFn. */
 export const signOut = createServerFn({ method: "POST" })
-	.validator(z.object({ everywhere: z.boolean().optional() }).optional())
+	.validator(signOutOptionsSchema.optional())
 	.handler(async ({ data }) => {
 		const { signOutBody } = await import("./functions.server.js");
-		return signOutBody(data?.everywhere);
+		return signOutBody(data);
 	});

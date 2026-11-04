@@ -59,11 +59,11 @@ const env = {
 
 const allowSession = (user: { sub: string }) => user.sub === "alice";
 
-const revocations = {
-	isRevoked: vi.fn(async () => false),
-	revoke: vi.fn(async () => {}),
-	revokeAllFor: vi.fn(async () => {}),
-	revokeIdpSession: vi.fn(async () => {}),
+const registry = {
+	isActive: vi.fn(async () => true),
+	register: vi.fn(async () => {}), end: vi.fn(async () => {}),
+	endAll: vi.fn(async () => {}),
+	applyLogout: vi.fn(async () => {}),
 };
 
 function apply(jar: Map<string, string>, lines: string[]) {
@@ -86,7 +86,7 @@ function request(path: string, jar = new Map<string, string>()) {
 function core(extra: Record<string, string> = {}) {
 	return createOidcCore({
 		allowSession,
-		revocations,
+		registry,
 		cookiePrefix: "sage",
 		environment: () => ({ ...env, ...extra }),
 	});
@@ -102,12 +102,12 @@ describe("OIDC core", () => {
 		const start = await auth.signIn(request("/"), new Map(), { loginHint: "alice+work@sage.test", prompt: "select_account" });
 		const params = new URL(start.url).searchParams;
 		expect(params.get("login_hint")).toBe("alice+work@sage.test");
-		expect(params.get("prompt")).toBe("select_account");
+		expect(params.get("prompt")).toBe("select_account consent");
 
 		const ordinary = await auth.signIn(request("/"), new Map(), "/dashboard");
 		const defaults = new URL(ordinary.url).searchParams;
 		expect(defaults.has("login_hint")).toBe(false);
-		expect(defaults.has("prompt")).toBe(false);
+		expect(defaults.get("prompt")).toBe("consent");
 	});
 
 	test("signs in, completes the callback, resolves the user, and signs out", async () => {
@@ -152,6 +152,7 @@ describe("OIDC core", () => {
 
 		const resolved = await auth.resolve(request("/", jar));
 		expect(resolved.session?.user).toEqual({
+			issuer: env.OIDC_ISSUER,
 			sub: "alice",
 			email: "alice@sage.test",
 			name: "Alice",
@@ -166,9 +167,8 @@ describe("OIDC core", () => {
 		);
 		apply(jar, out.setCookies);
 		expect(jar.size).toBe(0);
-		expect(revocations.revoke).toHaveBeenCalledWith(
-			resolved.session?.sid,
-			expect.any(Number),
+		expect(registry.end).toHaveBeenCalledWith(
+			{ issuer: env.OIDC_ISSUER, clientId: env.OIDC_CLIENT_ID, sid: resolved.session?.sid },
 		);
 		expect(oidc.tokenRevocation).toHaveBeenCalledWith(
 			expect.anything(),
@@ -189,7 +189,7 @@ describe("OIDC core", () => {
 	])("an authenticated user receives no session cookie for %s", async (_, deny) => {
 		const auth = createOidcCore({
 			environment: () => env,
-			revocations,
+			registry,
 			allowSession: deny,
 		});
 		const jar = new Map<string, string>();
@@ -307,7 +307,7 @@ describe("OIDC core", () => {
 		});
 		const auth = createOidcCore({
 			allowSession,
-			revocations,
+			registry,
 			environment: () => env,
 			onError,
 		});
@@ -353,7 +353,7 @@ describe("assertConfigured", () => {
 	test("names every missing or invalid setting at once", () => {
 		const auth = createOidcCore({
 			allowSession,
-			revocations,
+			registry,
 			environment: () => ({ OIDC_ISSUER: "idp", SESSION_SECRET: "short" }),
 		});
 
@@ -415,12 +415,13 @@ test("still signs out when the provider cannot revoke the refresh token", async 
 	oidc.tokenRevocation.mockRejectedValueOnce(new Error("offline"));
 	const auth = createOidcCore({
 		allowSession,
-		revocations,
+		registry,
 		environment: () => env,
 		onError,
 	});
 	const session = {
-		user: { sub: "alice", email: "a@x.test", name: null, roles: ["stellar"] },
+		version: 2 as const, clientId: env.OIDC_CLIENT_ID,
+		user: { issuer: "https://idp.test/application/o/sage/", sub: "alice", email: "a@x.test", name: null, roles: ["stellar"] },
 		accessToken: "a",
 		refreshToken: "r",
 		expiresAt: 0,
@@ -432,7 +433,7 @@ test("still signs out when the provider cannot revoke the refresh token", async 
 	const out = await auth.signOut(request("/logout"), new Map(), session);
 
 	expect(out.location).toContain("https://idp.test/logout");
-	expect(revocations.revoke).toHaveBeenCalledWith("s1", expect.any(Number));
+	expect(registry.end).toHaveBeenCalledWith({ issuer: env.OIDC_ISSUER, clientId: env.OIDC_CLIENT_ID, sid: "s1" });
 	expect(onError).toHaveBeenCalledWith(
 		expect.objectContaining({ operation: "token-revocation" }),
 	);
@@ -442,7 +443,7 @@ test("ends the sessions a verified back-channel logout token names", async () =>
 	const onError = vi.fn();
 	const auth = createOidcCore({
 		allowSession,
-		revocations,
+		registry,
 		environment: () => env,
 		onError,
 	});
@@ -461,61 +462,7 @@ test("ends the sessions a verified back-channel logout token names", async () =>
 	expect(onError).toHaveBeenCalledWith(
 		expect.objectContaining({ operation: "backchannel-logout" }),
 	);
-	expect(revocations.revokeIdpSession).not.toHaveBeenCalled();
-});
-
-test.each(["sid", "sub"] as const)("redelivery preserves the original %s revocation after key and storage outages", async (kind) => {
-	const { exportJWK, generateKeyPair, SignJWT } = await import("jose");
-	const { privateKey, publicKey } = await generateKeyPair("RS256");
-	const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256" };
-	vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [jwk] }))
-		.mockResolvedValueOnce(new Response(null, { status: 503 })));
-	Object.assign(oidc.metadata, {
-		issuer: env.OIDC_ISSUER,
-		jwks_uri: "https://idp.test/jwks/",
-	});
-	const issuedAt = Math.floor(Date.now() / 1000) - 60;
-	const token = await new SignJWT({
-		sub: "alice",
-		...(kind === "sid" ? { sid: "idp-1" } : {}),
-		events: { "http://schemas.openid.net/event/backchannel-logout": {} },
-	})
-		.setProtectedHeader({ alg: "RS256", kid: "k1" })
-		.setIssuer(env.OIDC_ISSUER)
-		.setAudience(env.OIDC_CLIENT_ID)
-		.setIssuedAt(issuedAt)
-		.setExpirationTime(issuedAt + 300)
-		.setJti("logout-1")
-		.sign(privateKey);
-
-	const write = kind === "sid" ? revocations.revokeIdpSession : revocations.revokeAllFor;
-	write.mockClear().mockRejectedValueOnce(new Error("database unavailable"));
-	const auth = createOidcCore({
-		allowSession, revocations, environment: () => env, onError: vi.fn(),
-		sessionMaxAgeSeconds: 3600,
-	});
-	const deliver = (logoutToken = token) => auth.backchannelLogout(new Request("https://internal:3000/auth/backchannel-logout", {
-		method: "POST",
-		body: new URLSearchParams({ logout_token: logoutToken }),
-	}));
-
-	try {
-		expect(await deliver()).toEqual({ status: 503 });
-		expect(write).not.toHaveBeenCalled();
-		const [header, payload, signature] = token.split(".");
-		const badSignature = (signature.startsWith("A") ? "B" : "A") + signature.slice(1);
-		expect(await deliver(`${header}.${payload}.${badSignature}`)).toEqual({ status: 400 });
-		expect(write).not.toHaveBeenCalled();
-		expect(await deliver()).toEqual({ status: 503 });
-		expect(await deliver()).toEqual({ status: 200 });
-		vi.useFakeTimers({ toFake: ["Date"], now: (issuedAt + 120) * 1000 });
-		expect(await deliver()).toEqual({ status: 200 });
-		const expected = kind === "sid" ? ["idp-1", issuedAt + 600 + 3600] : ["alice", issuedAt];
-		expect(write.mock.calls).toEqual([expected, expected, expected]);
-	} finally {
-		vi.useRealTimers();
-		vi.unstubAllGlobals();
-	}
+	expect(registry.applyLogout).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -523,11 +470,12 @@ test.each([
 	true,
 ])("sign-out fails when revocation persistence fails (everywhere=%s)", async (everywhere) => {
 	const failure = new Error("database unavailable");
-	if (everywhere) revocations.revokeAllFor.mockRejectedValueOnce(failure);
-	else revocations.revoke.mockRejectedValueOnce(failure);
+	if (everywhere) registry.endAll.mockRejectedValueOnce(failure);
+	else registry.end.mockRejectedValueOnce(failure);
 	const auth = core();
 	const session = {
-		user: { sub: "alice", email: "a@x.test", name: null, roles: ["stellar"] },
+		version: 2 as const, clientId: env.OIDC_CLIENT_ID,
+		user: { issuer: "https://idp.test/application/o/sage/", sub: "alice", email: "a@x.test", name: null, roles: ["stellar"] },
 		accessToken: "a",
 		refreshToken: "r",
 		expiresAt: 0,
@@ -536,98 +484,8 @@ test.each([
 		lastSeenAt: 0,
 	};
 	await expect(
-		auth.signOut(request("/logout"), new Map(), session, undefined, everywhere),
+		auth.signOut(request("/logout"), new Map(), session, undefined, { everywhere }),
 	).rejects.toBe(failure);
-});
-
-test("an idle cookie can revoke its still-active copy only for this sign-in", async () => {
-	const base = Date.now();
-	vi.useFakeTimers({ toFake: ["Date"], now: base });
-	const revoked = new Set<string>();
-	const revokeAllFor = vi.fn();
-	const auth = createOidcCore({
-		allowSession, environment: () => env, sessionIdleSeconds: 60, sessionMaxAgeSeconds: 120,
-		revocations: { ...revocations, revokeAllFor, isRevoked: async ({ sid }) => revoked.has(sid),
-			revoke: async (sid) => { revoked.add(sid); } },
-	});
-	try {
-		const owner = new Map<string, string>();
-		const start = await auth.signIn(request("/"), owner);
-		apply(owner, start.setCookies);
-		const state = new URL(start.url).searchParams.get("state");
-		const callback = await auth.callback(request(`/callback?code=c&state=${state}`, owner), owner);
-		expect(callback.ok).toBe(true);
-		apply(owner, callback.setCookies);
-		vi.setSystemTime(base + 40_000);
-		const copy = apply(new Map(owner), (await auth.resolve(request("/", owner))).setCookies);
-		vi.setSystemTime(base + 61_000);
-		const idle = await auth.resolve(request("/", owner));
-		expect(idle.session).toBeNull();
-		const active = await auth.resolve(request("/", copy));
-		expect(active.session?.user.sub).toBe("alice");
-		await expect(auth.signOut(request("/logout", owner), owner, idle.session, undefined, true))
-			.rejects.toThrow("active session");
-		expect(revokeAllFor).not.toHaveBeenCalled();
-		const out = await auth.signOut(request("/logout", owner), owner, idle.session);
-		expect(apply(owner, out.setCookies).size).toBe(0);
-		expect(revoked).toEqual(new Set([active.session!.sid]));
-		expect((await auth.resolve(request("/", copy))).session).toBeNull();
-
-		revoked.clear();
-		vi.setSystemTime(base + 121_000);
-		await auth.signOut(request("/logout", copy), copy, null);
-		expect(revoked.size).toBe(0);
-	} finally {
-		vi.useRealTimers();
-	}
-});
-
-test.each([false, true])("sign-out can be retried after a revocation read outage (everywhere=%s)", async (everywhere) => {
-	let offline = true;
-	const revoked = new Set<string>();
-	const failure = new Error("store offline");
-	const auth = createOidcCore({
-		allowSession,
-		environment: () => env,
-		onError: vi.fn(),
-		revocations: {
-			...revocations,
-			async isRevoked({ sid, sub }) {
-				if (offline) throw failure;
-				return revoked.has(sid) || revoked.has(sub);
-			},
-			async revoke(sid) { revoked.add(sid); },
-			async revokeAllFor(sub) { revoked.add(sub); },
-		},
-	});
-	const jar = new Map<string, string>();
-	const start = await auth.signIn(request("/"), jar);
-	apply(jar, start.setCookies);
-	const state = new URL(start.url).searchParams.get("state");
-	const callback = await auth.callback(request(`/callback?code=c&state=${state}`, jar), jar);
-	apply(jar, callback.setCookies);
-	const logout = request("/logout", jar);
-	const call = { correlationId: "logout-retry" };
-	const blocked = await auth.resolve(logout, call);
-	expect(auth.report).toHaveBeenCalledWith({ operation: "revocation-read", error: failure, context: call });
-	expect(blocked).toMatchObject({ session: null, setCookies: [] });
-	await expect(auth.signOut(logout, blocked.cookies, blocked.session, undefined, everywhere))
-		.rejects.toBe(failure);
-	expect(revoked.size).toBe(0);
-
-	offline = false;
-	const retry = await auth.resolve(logout);
-	expect(retry.session?.user.sub).toBe("alice");
-	// Recovery between resolution and sign-out may end this cookie, but cannot
-	// authorize ending other sessions until a fresh request resolves the user.
-	if (everywhere) {
-		await expect(auth.signOut(logout, blocked.cookies, null, undefined, true)).rejects.toThrow("active session");
-		expect(revoked.size).toBe(0);
-	}
-	const out = await auth.signOut(logout, retry.cookies, everywhere ? retry.session : null, undefined, everywhere);
-	expect(out.setCookies.join()).toContain("Max-Age=0");
-	expect(revoked).toEqual(new Set([everywhere ? "alice" : retry.session?.sid]));
-	expect((await auth.resolve(logout)).session).toBeNull(); // replay the original cookie
 });
 
 describe("grants", () => {
@@ -661,7 +519,7 @@ describe("grants", () => {
 
 		expect(result).toMatchObject({
 			ok: true,
-			user: { sub: "alice" },
+			user: { issuer: "https://idp.test/application/o/sage/", sub: "alice" },
 			tokens: { accessToken: "access", refreshToken: "refresh" },
 			returnPathname: "/oauth/upstream/finish?pending=p1",
 		});

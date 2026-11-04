@@ -43,7 +43,7 @@ export function oidcMiddleware(setup: OidcMiddlewareSetup) {
 				core ??= createOidcCore(setup);
 			}
 			const call = callContext(context);
-			const { cookies, session, setCookies } = await core.resolve(
+			const { cookies, session, setCookies, status, reason } = await core.resolve(
 				request,
 				call,
 			);
@@ -55,7 +55,7 @@ export function oidcMiddleware(setup: OidcMiddlewareSetup) {
 				cookies,
 				session,
 				call,
-				auth: () => ({ user: session?.user ?? null }),
+				auth: () => ({ user: session?.user ?? null, status, reason }),
 				appendSetCookie: (line) => appended.push(line),
 				discardSessionUpdates: () => { sessionUpdates = []; },
 			};

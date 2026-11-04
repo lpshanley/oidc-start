@@ -53,7 +53,7 @@ beforeEach(() => {
 	vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
 	oidc.metadata.end_session_endpoint = "https://idp.test/logout";
 	oidc.metadata.userinfo_endpoint = "https://idp.test/userinfo";
-	oidc.fetchUserInfo.mockReset().mockResolvedValue({ sub: "alice" });
+	oidc.fetchUserInfo.mockReset().mockResolvedValue({ issuer: "https://idp.test/application/o/sage/", sub: "alice" });
 });
 
 describe("provider", () => {
@@ -84,6 +84,7 @@ describe("provider", () => {
 		expect(Object.fromEntries(url.searchParams)).toEqual({
 			redirect_uri: "https://sage.test/api/auth/callback",
 			scope: "openid profile email offline_access",
+			prompt: "consent",
 			state: "st",
 			nonce: "no",
 			code_challenge: "challenge-ver",
@@ -144,6 +145,7 @@ describe("provider", () => {
 		);
 		expect(result).toEqual({
 			user: {
+				issuer: settings.OIDC_ISSUER,
 				sub: "alice",
 				email: "alice@sage.test",
 				name: "alice",
@@ -160,9 +162,9 @@ describe("provider", () => {
 		expect(oidc.fetchUserInfo).not.toHaveBeenCalled();
 	});
 
-	test("falls back to userinfo for a missing email and rejects users without one", async () => {
+	test("falls back to userinfo for a missing email and accepts users without one", async () => {
 		oidc.authorizationCodeGrant.mockResolvedValue(
-			tokenResponse({}, { sub: "bob" }, undefined),
+			tokenResponse({}, { issuer: "https://idp.test/application/o/sage/", sub: "bob" }, undefined),
 		);
 		oidc.fetchUserInfo.mockResolvedValueOnce({
 			sub: "bob",
@@ -176,9 +178,10 @@ describe("provider", () => {
 			new URL("https://s.test/cb"),
 			checks,
 		);
-		oidc.fetchUserInfo.mockResolvedValueOnce({ sub: "bob" });
+		oidc.fetchUserInfo.mockResolvedValueOnce({ issuer: "https://idp.test/application/o/sage/", sub: "bob" });
 
 		expect(user).toEqual({
+			issuer: settings.OIDC_ISSUER,
 			sub: "bob",
 			email: "b@x.test",
 			name: "Bob",
@@ -188,14 +191,14 @@ describe("provider", () => {
 		expect(tokens.expiresAt).toBe(1_000 + 300);
 		await expect(
 			provider.exchangeCode(new URL("https://s.test/cb"), checks),
-		).rejects.toThrow("no email");
+		).resolves.toMatchObject({ user: { issuer: settings.OIDC_ISSUER } });
 	});
 
-	test("uses ID token claims and still requires email without a UserInfo endpoint", async () => {
+	test("uses ID token claims and accepts optional email without a UserInfo endpoint", async () => {
 		delete oidc.metadata.userinfo_endpoint;
 		oidc.authorizationCodeGrant
-			.mockResolvedValueOnce(tokenResponse({}, { sub: "alice", email: "alice@x.test" }))
-			.mockResolvedValueOnce(tokenResponse({}, { sub: "alice" }));
+			.mockResolvedValueOnce(tokenResponse({}, { issuer: "https://idp.test/application/o/sage/", sub: "alice", email: "alice@x.test" }))
+			.mockResolvedValueOnce(tokenResponse({}, { issuer: "https://idp.test/application/o/sage/", sub: "alice" }));
 		const provider = createProvider(settings);
 		const callback = new URL("https://s.test/cb");
 		const checks = { state: "s", nonce: "n", codeVerifier: "v" };
@@ -203,7 +206,7 @@ describe("provider", () => {
 		await expect(provider.exchangeCode(callback, checks)).resolves.toMatchObject({
 			user: { email: "alice@x.test", roles: [] },
 		});
-		await expect(provider.exchangeCode(callback, checks)).rejects.toThrow("no email");
+		await expect(provider.exchangeCode(callback, checks)).resolves.toMatchObject({ user: { issuer: settings.OIDC_ISSUER } });
 		expect(oidc.fetchUserInfo).not.toHaveBeenCalled();
 	});
 
@@ -224,11 +227,11 @@ describe("provider", () => {
 		["neither", {}, {}, []],
 	])("reads roles from %s", async (_, tokenClaims, infoClaims, expected) => {
 		oidc.authorizationCodeGrant.mockResolvedValueOnce(
-			tokenResponse({}, { sub: "a", email: "a@x.test", ...tokenClaims }),
+			tokenResponse({}, { issuer: "https://idp.test/application/o/sage/", sub: "a", email: "a@x.test", ...tokenClaims }),
 		);
 		oidc.fetchUserInfo
 			.mockReset()
-			.mockResolvedValue({ sub: "a", ...infoClaims });
+			.mockResolvedValue({ issuer: "https://idp.test/application/o/sage/", sub: "a", ...infoClaims });
 
 		const { user } = await createProvider(settings).exchangeCode(
 			new URL("https://s.test/cb"),
@@ -301,7 +304,7 @@ describe("provider", () => {
 		oidc.authorizationCodeGrant.mockResolvedValueOnce(
 			tokenResponse(
 				{},
-				{ sub: "alice", email: "a@sage.test", picture, roles: [] },
+				{ issuer: "https://idp.test/application/o/sage/", sub: "alice", email: "a@sage.test", picture, roles: [] },
 			),
 		);
 
@@ -316,7 +319,7 @@ describe("provider", () => {
 
 test("re-reads policy claims on refresh, from the ID token or subject-checked UserInfo", async () => {
 	oidc.refreshTokenGrant.mockResolvedValueOnce(
-		tokenResponse({ access_token: "a2" }, { sub: "alice", roles: ["stellar"], email: "alice@new.test" }),
+		tokenResponse({ access_token: "a2" }, { issuer: "https://idp.test/application/o/sage/", sub: "alice", roles: ["stellar"], email: "alice@new.test" }),
 	);
 	await expect(
 		createProvider(settings).refresh("r1", "alice"),
@@ -324,16 +327,16 @@ test("re-reads policy claims on refresh, from the ID token or subject-checked Us
 	expect(oidc.fetchUserInfo).not.toHaveBeenCalled();
 
 	oidc.refreshTokenGrant.mockResolvedValueOnce(
-		tokenResponse({ access_token: "a3" }, { sub: "alice", roles: [] }),
+		tokenResponse({ access_token: "a3" }, { issuer: "https://idp.test/application/o/sage/", sub: "alice", roles: [] }),
 	);
-	oidc.fetchUserInfo.mockResolvedValueOnce({ sub: "alice", email: "alice@other.test", roles: ["stale"] });
+	oidc.fetchUserInfo.mockResolvedValueOnce({ issuer: "https://idp.test/application/o/sage/", sub: "alice", email: "alice@other.test", roles: ["stale"] });
 	await expect(
 		createProvider(settings).refresh("r2", "alice"),
 	).resolves.toMatchObject({ roles: [], email: "alice@other.test" });
 	expect(oidc.fetchUserInfo).toHaveBeenCalledWith(expect.anything(), "a3", "alice");
 
 	oidc.refreshTokenGrant.mockResolvedValueOnce(tokenResponse({}, undefined));
-	oidc.fetchUserInfo.mockResolvedValueOnce({ sub: "alice", roles: ["member"] });
+	oidc.fetchUserInfo.mockResolvedValueOnce({ issuer: "https://idp.test/application/o/sage/", sub: "alice", roles: ["member"] });
 	await expect(createProvider(settings).refresh("r3", "alice")).resolves.toMatchObject({ roles: ["member"] });
 });
 
@@ -369,12 +372,12 @@ describe("back-channel logout tokens", () => {
 
 		await expect(
 			provider.verifyLogoutToken(
-				await sign({ sub: "alice", sid: "idp-1", events: event }),
+				await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", sid: "idp-1", events: event }),
 			),
-		).resolves.toEqual({ sid: "idp-1", issuedAt: expect.any(Number) });
+		).resolves.toMatchObject({ sid: "idp-1", sub: "alice", jti: "token-1", expiresAt: expect.any(Number), issuedAt: expect.any(Number) });
 		await expect(
-			provider.verifyLogoutToken(await sign({ sub: "alice", events: event })),
-		).resolves.toEqual({ sub: "alice", issuedAt: expect.any(Number) });
+			provider.verifyLogoutToken(await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", events: event })),
+		).resolves.toMatchObject({ sub: "alice", jti: "token-1", expiresAt: expect.any(Number), issuedAt: expect.any(Number) });
 		vi.unstubAllGlobals();
 	});
 
@@ -384,15 +387,15 @@ describe("back-channel logout tokens", () => {
 		const provider = createProvider(settings);
 
 		for (const token of [
-			await sign({ sub: "alice", events: event }, "other-client"),
-			await sign({ sub: "alice" }),
-			await sign({ sub: "alice", events: event, nonce: "n" }),
-			await sign({ sub: "alice", events: event, exp: undefined }),
-			await sign({ sub: "alice", events: event, exp: 1 }),
-			await sign({ sub: "alice", events: event, jti: undefined }),
-			await sign({ sub: "alice", events: event, jti: "" }),
-			await sign({ sub: "alice", events: event, jti: 123 }),
-			await sign({ sub: "alice", events: { "http://schemas.openid.net/event/backchannel-logout": [] } }),
+			await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", events: event }, "other-client"),
+			await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice" }),
+			await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", events: event, nonce: "n" }),
+			await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", events: event, exp: undefined }),
+			await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", events: event, exp: 1 }),
+			await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", events: event, jti: undefined }),
+			await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", events: event, jti: "" }),
+			await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", events: event, jti: 123 }),
+			await sign({ issuer: "https://idp.test/application/o/sage/", sub: "alice", events: { "http://schemas.openid.net/event/backchannel-logout": [] } }),
 		]) {
 			await expect(provider.verifyLogoutToken(token)).rejects.toThrow();
 		}
@@ -413,7 +416,7 @@ test("the cached provider transport uses each caller's remaining budget", async 
 			await options[oidc.customFetch]("https://idp.test/token", {});
 			return tokenResponse(
 				{ access_token: "fresh" },
-				{ sub: "alice", roles: ["member"] },
+				{ issuer: "https://idp.test/application/o/sage/", sub: "alice", roles: ["member"] },
 			);
 		});
 		await provider.refresh("r", "alice", {
@@ -465,4 +468,18 @@ test("only failures before the refresh transport sends are safe to retry", async
 	} finally {
 		vi.unstubAllGlobals();
 	}
+});
+
+test("offline access uses consent unless the host establishes preauthorization", async () => {
+	const base = { redirectUri: "https://app.test/callback", state: "s", nonce: "n", codeVerifier: "v" };
+	const provider = createProvider(settings);
+	expect((await provider.authorizationUrl(base)).searchParams.get("prompt")).toBe("consent");
+	expect((await provider.authorizationUrl({ ...base, prompt: "login select_account" })).searchParams.get("prompt")).toBe("login select_account consent");
+	await expect(provider.authorizationUrl({ ...base, prompt: "none" })).rejects.toThrow("requires consent");
+	await expect(provider.authorizationUrl({ ...base, prompt: "none login" })).rejects.toThrow();
+	const preauthorized = createProvider(settings, 5000, "preauthorized");
+	expect((await preauthorized.authorizationUrl(base)).searchParams.has("prompt")).toBe(false);
+	expect((await preauthorized.authorizationUrl({ ...base, prompt: "none" })).searchParams.get("prompt")).toBe("none");
+	const online = createProvider({ ...settings, OIDC_SCOPES: "openid profile" });
+	expect((await online.authorizationUrl(base)).searchParams.has("prompt")).toBe(false);
 });

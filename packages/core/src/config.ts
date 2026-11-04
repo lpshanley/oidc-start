@@ -1,7 +1,9 @@
 import { z } from "zod";
+import type { SessionReason } from "./session.js";
+import type { CallbackErrorReason } from "./core.js";
 import type { AuthUser } from "./models.js";
 import type { SessionRefreshCoordinator } from "./refresh.js";
-import type { SessionRevocations } from "./revocation.js";
+import type { SessionRegistry } from "./registry.js";
 
 export type AuthEnvironment = Readonly<Record<string, string | undefined>>;
 export type AuthEnvironmentProvider = () => AuthEnvironment;
@@ -35,6 +37,8 @@ export const authServiceOptionsSchema = z.object({
 	postLogoutPath: z.string().default("/login"),
 	/** Timeout for each provider request. Defaults to 5 seconds. */
 	providerTimeoutMs: z.number().int().positive().default(5_000),
+	/** OIDC Core §11: omit consent only with an established host/provider basis. */
+	offlineAccessConsent: z.enum(["prompt", "preauthorized"]).default("prompt"),
 });
 export type AuthServiceOptions = z.input<typeof authServiceOptionsSchema>;
 
@@ -114,18 +118,21 @@ export type OidcErrorEvent = {
 		| "callback"
 		| "refresh"
 		| "end-session"
-		| "revocation-read"
+		| "registry-read"
+		| "session-policy"
 		| "token-revocation"
 		| "backchannel-logout";
 	error: unknown;
+	/** Bounded, credential-free classification safe for telemetry. */
+	reason?: SessionReason | CallbackErrorReason | "session_access_denied" | "logout_validation_failed" | "logout_storage_failed";
 	context?: OidcCallContext;
 };
 
 export type OidcMiddlewareOptions = AuthServiceOptions & {
-	/** The host must return or resolve to true to start or keep a session. */
-	allowSession: (user: AuthUser) => boolean | Promise<boolean>;
-	/** Server-side record of ended sessions. */
-	revocations: SessionRevocations;
+	/** Optional admission policy. Defaults to accepting authenticated users; when supplied, it must return true. */
+	allowSession?: (user: AuthUser) => boolean | Promise<boolean>;
+	/** Shared registry of active application sessions. */
+	registry: SessionRegistry;
 	/** Share rotating session refreshes between app instances. */
 	refreshCoordinator?: SessionRefreshCoordinator;
 	/** Read configuration inside each request. Defaults to process.env. */

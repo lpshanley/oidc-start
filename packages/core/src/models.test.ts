@@ -10,9 +10,9 @@ import {
 
 test("the user guard validates the complete public identity before display helpers use it", () => {
 	for (const name of [undefined, 42, {}, []]) {
-		expect(isAuthUser({ sub: "alice", email: "alice@test", name })).toBe(false);
+		expect(isAuthUser({ issuer: "https://idp.test/application/o/sage/", sub: "alice", email: "alice@test", name })).toBe(false);
 	}
-	const user = { sub: "alice", email: "alice@test", name: null };
+	const user = { issuer: "https://idp.test/application/o/sage/", sub: "alice", email: "alice@test", name: null };
 	expect(isAuthUser(user)).toBe(true);
 	expect(displayName(user)).toBe("alice@test");
 	expect(authSessionSchema.parse({ user: null })).toEqual({ user: null });
@@ -30,6 +30,7 @@ test("canonical auth options retain defaults and public logout results validate 
 		grantCallbackPath: "/api/auth/grant-callback",
 		postLogoutPath: "/login",
 		providerTimeoutMs: 5_000,
+		offlineAccessConsent: "prompt",
 	});
 	expect(authLogoutResultSchema.parse({ endSessionUrl: null })).toEqual({
 		endSessionUrl: null,
@@ -61,7 +62,7 @@ test("local return paths preserve queries, fragments and safe path normalization
 });
 
 test("the user picture is optional, http(s) only, and never invalidates a session", () => {
-	const user = { sub: "alice", email: "alice@test", name: null };
+	const user = { issuer: "https://idp.test/application/o/sage/", sub: "alice", email: "alice@test", name: null };
 
 	expect(authSessionSchema.parse({ user }).user?.picture).toBeUndefined();
 	expect(

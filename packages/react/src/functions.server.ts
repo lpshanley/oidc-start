@@ -1,12 +1,21 @@
 import { redirect } from "@tanstack/react-router";
-import { setResponseHeader } from "@tanstack/react-start/server";
+import { setResponseHeader, setResponseStatus } from "@tanstack/react-start/server";
 import { endSession } from "./sign-out.server.js";
 import { checkRecentAuth, getOidcContext } from "./context.js";
-import type { AuthSession, SignInOptions } from "@lpshanley/oidc-start-core/models";
+import type { AuthSession, SignInOptions, SignOutOptions } from "@lpshanley/oidc-start-core/models";
 
 export function getAuthBody(): AuthSession {
 	setResponseHeader("Cache-Control", "no-store");
-	return { user: getOidcContext().auth().user };
+	const auth = getOidcContext().auth();
+	if (auth.status === "denied" || auth.status === "unavailable") {
+        const status = auth.status === "denied" ? 403 : 503;
+        setResponseStatus(status);
+        // Loader errors must serialize during SSR. A thrown Response cannot.
+        throw Object.assign(new Error(auth.status === "denied"
+          ? "Your account does not have access."
+          : "Authentication is temporarily unavailable. Try again."), { status });
+	}
+	return { user: auth.user };
 }
 
 export function getRecentAuthBody(maxAge: number): AuthSession {
@@ -26,8 +35,8 @@ export async function getSignInUrlBody(options?: SignInOptions) {
 	return url;
 }
 
-export async function signOutBody(everywhere = false): Promise<never> {
-	const result = await endSession(everywhere);
+export async function signOutBody(options: SignOutOptions = {}): Promise<never> {
+	const result = await endSession(options);
 	if (result instanceof Response) throw result;
 	throw redirect({ href: result, reloadDocument: true });
 }

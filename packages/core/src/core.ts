@@ -15,15 +15,15 @@ import {
 	parseCookies,
 	serializeCookie,
 } from "./cookies.js";
-import { isInvalidLogoutToken, LOGOUT_TOKEN_MAX_AGE_SECONDS, type LogoutTarget } from "./logout-token.js";
-import { type AuthUser, sanitizeReturnPath, type SignInOptions, signInOptionsSchema } from "./models.js";
+import { type LogoutTarget } from "./logout-token.js";
+import { type AuthUser, sanitizeReturnPath, type SignInOptions, type SignOutOptions, signInOptionsSchema, signOutOptionsSchema } from "./models.js";
 import {
 	authorizationErrorCode,
 	createProvider,
 	type OidcProvider,
 	type TokenSet,
 } from "./provider.js";
-import { createSessionManager, type Session } from "./session.js";
+import { createSessionManager, type Session, type SessionResolution } from "./session.js";
 import {
 	type FlowPurpose,
 	OidcStateError,
@@ -39,7 +39,7 @@ import {
 // adapters over these operations, mirroring how WorkOS splits
 // authkit-session (core) from authkit-tanstack-react-start (adapter).
 
-export type OidcAuth = { user: AuthUser | null };
+export type OidcAuth = { user: AuthUser | null; status: SessionResolution["status"]; reason?: SessionResolution["reason"] };
 
 /** The provider authenticated a user whom the host denied a session. */
 export class SessionAccessDeniedError extends Error {
@@ -83,6 +83,7 @@ function logIdentityFailure(event: OidcErrorEvent) {
 			event: `oidc.${event.operation}.failed`,
 			component: "identity",
 			request_id: event.context?.correlationId,
+			reason: event.reason,
 		}),
 	);
 }
@@ -112,10 +113,15 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		if (cached?.key !== key) {
 			cached = {
 				key,
-				provider: createProvider(config, settings.providerTimeoutMs),
+				provider: createProvider(config, settings.providerTimeoutMs, settings.offlineAccessConsent),
 			};
 		}
 		return cached.provider;
+	}
+
+	function scope() {
+		const config = oidcConfigurationSchema.parse(environment());
+		return { issuer: config.OIDC_ISSUER, clientId: config.OIDC_CLIENT_ID };
 	}
 
 	function password() {
@@ -263,7 +269,8 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		idleSeconds: settings.sessionIdleSeconds,
 		password,
 		provider,
-		revocations: options.revocations,
+		registry: options.registry,
+		scope,
 		refreshCoordinator: options.refreshCoordinator,
 		allowSession: options.allowSession,
 	});
@@ -272,12 +279,12 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		/** Reads, and when needed refreshes or clears, the request's session. */
 		async resolve(request: Request, context?: OidcCallContext) {
 			const cookies = parseCookies(request.headers.get("cookie"));
-			const { session, setCookies } = await sessions.resolve(
+			const result = await sessions.resolve(
 				cookies,
-				(error, operation) => onError({ operation, error, context }),
+				(error, operation, reason) => onError({ operation, reason, error, context }),
 				context,
 			);
-			return { cookies, session, setCookies };
+			return { cookies, ...result };
 		},
 
 		/** An authorization URL plus the flow's verifier cookie. */
@@ -303,23 +310,22 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			if (!result.ok) return result;
 			const { user, tokens, idpSid, authTime, flow, clearVerifier } = result;
 			try {
-					if (!(await sessions.isAllowed(user))) throw new SessionAccessDeniedError();
+				if (!(await sessions.isAllowed(user))) throw new SessionAccessDeniedError();
 				const now = Math.floor(Date.now() / 1000);
+				const session: Session = {
+					version: 2, clientId: scope().clientId, user, ...tokens,
+					sid: crypto.randomUUID(), ...(idpSid ? { idpSid } : {}),
+					authTime, issuedAt: now, lastSeenAt: now,
+				};
+				// Seal first so a serialization failure cannot leave an unnecessary row.
+				const setCookies = await sessions.write(cookies, session);
+				await options.registry.register({
+					...scope(), sid: session.sid, sub: user.sub, idpSid,
+					expiresAt: now + settings.sessionMaxAgeSeconds,
+				});
 				return {
-					ok: true,
-					location: new URL(flow.returnPathname, origin(request)).toString(),
-					setCookies: [
-						...(await sessions.write(cookies, {
-							user,
-							...tokens,
-							sid: crypto.randomUUID(),
-							...(idpSid ? { idpSid } : {}),
-							authTime,
-							issuedAt: now,
-							lastSeenAt: now,
-						})),
-						...clearVerifier,
-					],
+					ok: true, location: new URL(flow.returnPathname, origin(request)).toString(),
+					setCookies: [...setCookies, ...clearVerifier],
 				};
 			} catch (error) {
 				const reason = error instanceof SessionAccessDeniedError ? "session_access_denied" : "session_failed";
@@ -385,7 +391,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		/**
 		 * Ends the session server-side (every session of the user with
 		 * `everywhere`), clears the cookie, and returns the provider logout URL.
-		 * Throws when the revocation cannot be recorded, so a sign-out is never
+		 * Throws when the session cannot be ended, so a sign-out is never
 		 * reported done while the cookie would still work.
 		 */
 		async signOut(
@@ -393,10 +399,10 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			cookies: Map<string, string>,
 			session: Session | null,
 			context?: OidcCallContext,
-			everywhere = false,
+			logoutOptions: SignOutOptions = {},
 		) {
-			// A failed revocation lookup is anonymous for ordinary requests. Before
-			// signing out, require a definitive result for any presented cookie.
+			const { everywhere = false, providerLogout = true } = signOutOptionsSchema.parse(logoutOptions);
+			// Before signing out, require a definitive registry result for any presented cookie.
 			if (!session) {
 				const checked = await sessions.readSession(cookies, "sign-out");
 				if (checked.session && everywhere) {
@@ -406,15 +412,9 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				session = checked.session;
 			}
 			if (session) {
-				const now = Math.floor(Date.now() / 1000);
-				if (everywhere)
-					await options.revocations.revokeAllFor(session.user.sub, now);
-				else {
-					await options.revocations.revoke(
-						session.sid,
-						session.issuedAt + settings.sessionMaxAgeSeconds,
-					);
-				}
+				const sessionScope = { issuer: session.user.issuer, clientId: session.clientId };
+				if (everywhere) await options.registry.endAll({ ...sessionScope, sub: session.user.sub });
+				else await options.registry.end({ ...sessionScope, sid: session.sid });
 			}
 			const refreshToken = session?.refreshToken;
 			if (refreshToken) {
@@ -431,7 +431,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			const afterLogout = `${origin(request)}${sanitizeReturnPath(settings.postLogoutPath)}`;
 			let location = afterLogout;
 			try {
-				location =
+				if (providerLogout) location =
 					(await withinDeadline(
 						() => provider().endSessionUrl(
 							{
@@ -449,44 +449,26 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			return { location, setCookies: sessions.clear(cookies) };
 		},
 
-		/**
-		 * Handles a provider's back-channel logout: verifies the posted
-		 * logout_token and ends the sessions it names. Answers 400 for an
-		 * invalid token and 503 when the provider's keys or the revocation
-		 * store cannot be reached, so the provider can retry.
-		 */
-		async backchannelLogout(
-			request: Request,
-			context?: OidcCallContext,
-		): Promise<{ status: 200 | 400 | 503 }> {
+		/** OIDC Back-Channel Logout §§2.6–2.8: validate, commit, then acknowledge. */
+		async backchannelLogout(request: Request, context?: OidcCallContext): Promise<{ status: 200 | 400 }> {
 			const form = await request.formData().catch(() => undefined);
 			const token = form?.get("logout_token");
-			if (typeof token !== "string" || token.length === 0) {
-				return { status: 400 };
-			}
+			if (typeof token !== "string" || token.length === 0) return { status: 400 };
 			let target: LogoutTarget;
 			try {
-				target = await withinDeadline(
-					() => provider().verifyLogoutToken(token, context),
-					context,
-				);
+				target = await withinDeadline(() => provider().verifyLogoutToken(token, context), context);
 			} catch (error) {
-				onError({ operation: "backchannel-logout", error, context });
-				return { status: isInvalidLogoutToken(error) ? 400 : 503 };
+				onError({ operation: "backchannel-logout", reason: "logout_validation_failed", error, context });
+				return { status: 400 };
 			}
-			// Retries must apply the original event, even after a new sign-in.
 			try {
-				if ("sid" in target) {
-					// A session active on the last possible delivery must stay revoked
-					// for its full lifetime. Every delivery writes the same expiry.
-					await options.revocations.revokeIdpSession(
-						target.sid,
-						target.issuedAt + LOGOUT_TOKEN_MAX_AGE_SECONDS + settings.sessionMaxAgeSeconds,
-					);
-				} else await options.revocations.revokeAllFor(target.sub, target.issuedAt);
+				const { sid, ...event } = target;
+				await options.registry.applyLogout(sid !== undefined
+					? { ...scope(), ...event, idpSid: sid }
+					: { ...scope(), ...event, sub: target.sub! });
 			} catch (error) {
-				onError({ operation: "backchannel-logout", error, context });
-				return { status: 503 };
+				onError({ operation: "backchannel-logout", reason: "logout_storage_failed", error, context });
+				return { status: 400 };
 			}
 			return { status: 200 };
 		},
