@@ -27,3 +27,14 @@ test("protected navigation redirects a guest locally without starting a provider
 	assert.equal(location.searchParams.get("returnPathname"), "/account?tab=profile");
 	assert.deepEqual(response.headers.getSetCookie(), []);
 });
+
+test("the recent-auth guard carries the requested login age into sign-in", async () => {
+	const request = new Request("https://app.example.test/settings");
+	const response = await app.fetch(request);
+	assert.ok(response.status >= 300 && response.status < 400);
+	const location = new URL(response.headers.get("location"), request.url);
+	assert.equal(location.pathname, "/sign-in");
+	assert.equal(location.searchParams.get("maxAge"), "300");
+	assert.equal(location.searchParams.get("returnPathname"), "/settings");
+	assert.deepEqual(response.headers.getSetCookie(), []);
+});

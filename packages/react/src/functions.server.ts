@@ -1,12 +1,17 @@
 import { redirect } from "@tanstack/react-router";
 import { setResponseHeader } from "@tanstack/react-start/server";
 import { endSession } from "./sign-out.server.js";
-import { getOidcContext } from "./context.js";
+import { checkRecentAuth, getOidcContext } from "./context.js";
 import type { AuthSession, SignInOptions } from "@lpshanley/oidc-start-core/models";
 
 export function getAuthBody(): AuthSession {
 	setResponseHeader("Cache-Control", "no-store");
 	return { user: getOidcContext().auth().user };
+}
+
+export function getRecentAuthBody(maxAge: number): AuthSession {
+	const auth = getAuthBody();
+	return checkRecentAuth({ maxAge }).isStale ? { user: null } : auth;
 }
 
 export async function getSignInUrlBody(options?: SignInOptions) {

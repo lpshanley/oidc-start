@@ -47,13 +47,23 @@ export async function signInRoute(
 ) {
 	const context = getOidcContext();
 	try {
+		const query = new URL(request.url).searchParams;
+		const requestedAge = query.get("maxAge");
+		let maxAge = options.maxAge;
+		if (requestedAge !== null) {
+			const age = Number(requestedAge);
+			if (!/^\d+$/.test(requestedAge) || !Number.isSafeInteger(age)) {
+				return new Response("Invalid maxAge.", { status: 400, headers: { "Cache-Control": "no-store" } });
+			}
+			maxAge = Math.min(maxAge ?? age, age);
+		}
 		const { url, setCookies } = await context.core.signIn(
 			request,
 			context.cookies,
 			{
-				returnPathname: new URL(request.url).searchParams.get("returnPathname") ?? options.returnPathname,
+				returnPathname: query.get("returnPathname") ?? options.returnPathname,
 				loginHint: options.loginHint,
-				maxAge: options.maxAge,
+				maxAge,
 				prompt: options.prompt,
 			},
 			context.call,

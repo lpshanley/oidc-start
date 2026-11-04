@@ -141,6 +141,16 @@ Pass `onError({ reason, request })` to `handleCallbackRoute` to return a custom 
 
 ### Require a recent login
 
+Use `requireRecentAuth` from `@lpshanley/oidc-start-react/functions` in `beforeLoad` for a page that requires a recent provider login.
+
+```ts
+beforeLoad: ({ location }) => requireRecentAuth({
+  maxAge: 300, signInPath: '/sign-in', returnPathname: location.href,
+})
+```
+
+A guest or stale session is sent to the local sign-in endpoint with the same `maxAge` in seconds. A `maxAge` configured on `handleSignInRoute` caps the value the URL can request. Choose a positive window that gives the user time to return from the provider.
+
 Inside the server handler for a sensitive action, call `checkRecentAuth({ maxAge: 300 })` from `@lpshanley/oidc-start-react/server` before performing the action. If `isStale` is true, stop the mutation and offer `signIn({ maxAge: 300, returnPathname: '/settings' })`. Check again when the user submits the action after returning. Pick the maximum age in the server's policy.
 
 The age is in seconds and comes from the provider's ID-token `auth_time`. Signed-out users, existing sessions without that claim, and expired authentication all require sign-in. Token refresh preserves the original authentication time. A sign-in with `maxAge: 0` requests fresh authentication.

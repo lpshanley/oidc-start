@@ -19,9 +19,10 @@ type GuardOptions = {
 	returnPathname: string;
 };
 
-function redirectToSignIn({ signInPath, returnPathname }: GuardOptions): never {
+function redirectToSignIn({ signInPath, returnPathname }: GuardOptions, maxAge?: number): never {
 	const url = new URL(sanitizeReturnPath(signInPath), "https://sign-in.invalid");
 	url.searchParams.set("returnPathname", sanitizeReturnPath(returnPathname));
+	if (maxAge !== undefined) url.searchParams.set("maxAge", String(maxAge));
 	throw redirect({ href: url.pathname + url.search + url.hash, reloadDocument: true });
 }
 
@@ -29,6 +30,20 @@ function redirectToSignIn({ signInPath, returnPathname }: GuardOptions): never {
 export async function requireAuth(options: GuardOptions) {
 	const { user } = await getAuth();
 	if (!user) redirectToSignIn(options);
+	return { user };
+}
+
+const getRecentAuth = createServerFn({ method: "GET" })
+	.validator(z.object({ maxAge: z.int().nonnegative() }))
+	.handler(async ({ data }) => {
+		const { getRecentAuthBody } = await import("./functions.server.js");
+		return getRecentAuthBody(data.maxAge);
+	});
+
+/** Guard navigation using the provider login time. Recheck inside sensitive actions. */
+export async function requireRecentAuth(options: GuardOptions & { maxAge: number }) {
+	const { user } = await getRecentAuth({ data: { maxAge: options.maxAge } });
+	if (!user) redirectToSignIn(options, options.maxAge);
 	return { user };
 }
 
