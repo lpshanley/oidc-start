@@ -173,7 +173,7 @@ export function createSessionManager({
 	async function resolve(
 		cookies: Map<string, string>,
 		onError: (error: unknown, operation: "refresh" | "revocation-read") => void = () => {},
-		bound: <T>(work: Promise<T>) => Promise<T> = (work) => work,
+		bound: <T>(start: () => Promise<T>) => Promise<T> = (start) => start(),
 		context?: OidcCallContext,
 	): Promise<SessionResolution> {
 		const checked = await readActive(cookies, (error) => onError(error, "revocation-read"));
@@ -192,15 +192,14 @@ export function createSessionManager({
 		}
 		try {
 			const refreshToken = session.refreshToken;
-			const work = refreshCoordinator
+			const refreshedTokens = await bound(() => refreshCoordinator
 				? sharedRefresh(refreshCoordinator, {
 					session,
 					until: session.issuedAt + maxAgeSeconds,
 					password: password(),
 					refresh: () => provider().refresh(refreshToken, session.user.sub, context),
 				})
-				: refreshOnce(refreshToken, session.user.sub, context);
-			const refreshedTokens = await bound(work);
+				: refreshOnce(refreshToken, session.user.sub, context));
 			if (!refreshedTokens) return { session: null, setCookies: [] };
 			const { roles, ...tokens } = refreshedTokens;
 			const refreshed: Session = {

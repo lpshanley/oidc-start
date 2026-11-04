@@ -366,18 +366,20 @@ describe("assertConfigured", () => {
 
 describe("withinDeadline", () => {
 	test("passes work through without a deadline", async () => {
-		await expect(withinDeadline(Promise.resolve(1))).resolves.toBe(1);
+		await expect(withinDeadline(() => Promise.resolve(1))).resolves.toBe(1);
 	});
 
-	test("rejects at once when the deadline has passed", async () => {
+	test("does not start work that could reject after an expired deadline", async () => {
+		const start = vi.fn(async () => { throw new Error("provider failure"); });
 		await expect(
-			withinDeadline(new Promise(() => {}), { deadline: 10 }, 20),
+			withinDeadline(start, { deadline: 10 }, 20),
 		).rejects.toBeInstanceOf(OidcDeadlineError);
+		expect(start).not.toHaveBeenCalled();
 	});
 
 	test("rejects hung work when the remaining time runs out", async () => {
 		vi.useFakeTimers();
-		const hung = withinDeadline(new Promise(() => {}), {
+		const hung = withinDeadline(() => new Promise(() => {}), {
 			deadline: Date.now() + 1_000,
 		});
 		const settled = expect(hung).rejects.toBeInstanceOf(OidcDeadlineError);

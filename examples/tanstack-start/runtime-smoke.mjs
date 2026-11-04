@@ -17,3 +17,8 @@ core.assertConfigured();
 assert.equal((await core.resolve(new Request("https://app.example.test/"))).session, null);
 assert.equal(typeof oidcMiddleware, "function");
 assert.equal(typeof handleCallbackRoute(), "function");
+
+// Run in plain Node so an abandoned provider rejection also fails the process.
+await assert.rejects(core.refreshGrant("fixture", { deadline: Date.now() - 1 }), {
+	name: "OidcDeadlineError",
+});
