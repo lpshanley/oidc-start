@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { redirect } from "@tanstack/react-router";
 import type { OidcContext } from "./context.js";
 
 const start = vi.hoisted(() => ({
@@ -11,6 +12,7 @@ const start = vi.hoisted(() => ({
 		  }) => Promise<unknown>),
 	context: undefined as OidcContext | undefined,
 	setResponseHeader: vi.fn(),
+	appendResponseHeader: vi.fn(),
 }));
 vi.mock("@tanstack/react-start", () => ({
 	createMiddleware: () => ({
@@ -23,6 +25,7 @@ vi.mock("@tanstack/react-start", () => ({
 }));
 vi.mock("@tanstack/react-start/server", () => ({
 	setResponseHeader: start.setResponseHeader,
+	appendResponseHeader: start.appendResponseHeader,
 }));
 
 const core = {
@@ -64,7 +67,7 @@ beforeEach(() => {
 });
 
 describe("oidcMiddleware", () => {
-	test("exposes the session and appends refreshed and queued cookies", async () => {
+	test("preserves a router redirect while appending refreshed and queued cookies", async () => {
 		oidcMiddleware({ core: () => core as unknown as OidcContext["core"] });
 		core.resolve.mockResolvedValue({
 			cookies: new Map([["a", "1"]]),
@@ -72,6 +75,8 @@ describe("oidcMiddleware", () => {
 			setCookies: ["sage_session=refreshed"],
 		});
 		const request = new Request("https://sage.test/");
+
+		const response = redirect({ href: "https://idp.test/logout", reloadDocument: true });
 
 		const result = (await start.server?.({
 			request,
@@ -83,13 +88,7 @@ describe("oidcMiddleware", () => {
 				expect(oidc.request).toBe(request);
 				expect(oidc.call).toEqual({ correlationId: "req-1", deadline: 5 });
 				oidc.appendSetCookie("sage-verifier-1=x");
-				return {
-					request,
-					response: new Response("ok", {
-						status: 201,
-						headers: { "x-kept": "1" },
-					}),
-				};
+				return { request, response };
 			},
 		})) as { response: Response };
 
@@ -97,13 +96,11 @@ describe("oidcMiddleware", () => {
 			correlationId: "req-1",
 			deadline: 5,
 		});
-		expect(result.response.status).toBe(201);
-		expect(result.response.headers.get("x-kept")).toBe("1");
-		expect(result.response.headers.getSetCookie()).toEqual([
+		expect(result.response).toBe(response);
+		expect(start.appendResponseHeader).toHaveBeenCalledWith("Set-Cookie", [
 			"sage_session=refreshed",
 			"sage-verifier-1=x",
 		]);
-		expect(await result.response.text()).toBe("ok");
 	});
 
 	test("uses a core composed by the app", async () => {

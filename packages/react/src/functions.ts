@@ -18,7 +18,7 @@ export const getSignInUrl = createServerFn({ method: "GET" })
 		return getSignInUrlBody(data?.returnPathname);
 	});
 
-/** Clears the session and redirects the document to the provider logout. */
+/** Clears the session and redirects to provider logout. In a component, call via useServerFn. */
 export const signOut = createServerFn({ method: "POST" }).handler(async () => {
 	const { signOutBody } = await import("./functions.server.js");
 	return signOutBody();

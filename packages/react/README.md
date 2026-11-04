@@ -15,4 +15,4 @@ export const Route = createFileRoute('/auth/callback')({
 
 Register `handleSignInRoute()` on GET and `handleSignOutRoute()` and `handleBackchannelLogoutRoute()` on POST. Add `server.middleware: [createCsrfMiddleware()]` to the browser sign-out route as well. The provider posts signed tokens to the separate back-channel route without a browser Origin header, so leave that route outside the browser CSRF check.
 
-Import `getAuth`, `getSignInUrl` and `signOut` from `@lpshanley/oidc-start-react/functions`. Use `getOidcContext` from `@lpshanley/oidc-start-react/server` inside server handlers. The adapter ships ESM with its server-function declarations intact for the consuming app's Start compiler.
+Import `getAuth`, `getSignInUrl` and `signOut` from `@lpshanley/oidc-start-react/functions`. In a React component, bind `const signOutAndRedirect = useServerFn(signOut)` from TanStack Start and call it in the click handler so the router follows the logout redirect. Use `getOidcContext` from `@lpshanley/oidc-start-react/server` inside server handlers. The adapter ships ESM with its server-function declarations intact for the consuming app's Start compiler.
