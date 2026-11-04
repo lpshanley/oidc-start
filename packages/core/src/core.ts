@@ -36,6 +36,33 @@ import {
 
 export type OidcAuth = { user: AuthUser | null };
 
+/** The caller's deadline passed before the provider answered. */
+export class OidcDeadlineError extends Error {
+	override name = "OidcDeadlineError";
+	constructor() {
+		super("The request deadline passed before the provider answered");
+	}
+}
+
+/**
+ * Settles with the work, or rejects once the caller's deadline passes. Each
+ * provider request also has its own timeout, so abandoned work still ends.
+ */
+export function withinDeadline<T>(
+	work: Promise<T>,
+	context?: OidcCallContext,
+	now = Date.now(),
+): Promise<T> {
+	if (context?.deadline === undefined) return work;
+	const remaining = context.deadline - now;
+	if (remaining <= 0) return Promise.reject(new OidcDeadlineError());
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const expired = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new OidcDeadlineError()), remaining);
+	});
+	return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}
+
 /** The provider authenticated a user whom the host denied a session. */
 export class SessionAccessDeniedError extends Error {
 	override name = "SessionAccessDeniedError";
@@ -124,6 +151,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		request: Request,
 		cookies: Map<string, string>,
 		returnPathname: string | null | undefined,
+		context: OidcCallContext | undefined,
 	) {
 		const nonce = randomNonce();
 		const codeVerifier = randomPKCECodeVerifier();
@@ -136,13 +164,17 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			password(),
 		);
 		const name = verifierCookieName(prefix(), state);
-		const url = await provider().authorizationUrl(
-			{
-				redirectUri: redirectUri(request),
-				state,
-				nonce,
-				codeVerifier,
-			},
+		const url = await withinDeadline(
+			provider().authorizationUrl(
+				{
+					redirectUri: redirectUri(request),
+					state,
+					nonce,
+					codeVerifier,
+				},
+				context,
+			),
+			context,
 		);
 		const stale = staleVerifierNames(cookies.keys(), {
 			prefix: prefix(),
@@ -163,6 +195,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 	async function complete(
 		request: Request,
 		cookies: Map<string, string>,
+		context: OidcCallContext | undefined,
 	) {
 		const url = new URL(request.url);
 		const state = url.searchParams.get("state");
@@ -182,13 +215,17 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			// in front of the app doesn't change the URL being verified.
 			const callbackUrl = new URL(redirectUri(request));
 			callbackUrl.search = url.search;
-			const { user, tokens, idpSid } = await provider().exchangeCode(
-				callbackUrl,
-				{
-					state,
-					nonce: flow.nonce,
-					codeVerifier: flow.codeVerifier,
-				},
+			const { user, tokens, idpSid } = await withinDeadline(
+				provider().exchangeCode(
+					callbackUrl,
+					{
+						state,
+						nonce: flow.nonce,
+						codeVerifier: flow.codeVerifier,
+					},
+					context,
+				),
+				context,
 			);
 			return { ok: true as const, flow, user, tokens, idpSid, clearVerifier };
 		} catch (error) {
@@ -214,6 +251,8 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			const { session, setCookies } = await sessions.resolve(
 				cookies,
 				(error) => onError({ operation: "refresh", error, context }),
+				(work) => withinDeadline(work, context),
+				context,
 			);
 			return { cookies, session, setCookies };
 		},
@@ -223,16 +262,18 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			request: Request,
 			cookies: Map<string, string>,
 			returnPathname?: string | null,
+			context?: OidcCallContext,
 		) {
-			return begin(request, cookies, returnPathname);
+			return begin(request, cookies, returnPathname, context);
 		},
 
 		/** Verifies the flow, exchanges the code, and issues the session. */
 		async callback(
 			request: Request,
 			cookies: Map<string, string>,
+			context?: OidcCallContext,
 		): Promise<CallbackResult> {
-			const result = await complete(request, cookies);
+			const result = await complete(request, cookies, context);
 			if (!result.ok) return result;
 			const { user, tokens, idpSid, flow, clearVerifier } = result;
 			try {

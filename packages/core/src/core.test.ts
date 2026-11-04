@@ -43,7 +43,9 @@ vi.mock("openid-client", () => oidc);
 
 const {
 	createOidcCore,
+	OidcDeadlineError,
 	SessionAccessDeniedError,
+	withinDeadline,
 } = await import("./core.js");
 
 const env = {
@@ -269,5 +271,50 @@ describe("assertConfigured", () => {
 		expect(() => auth.assertConfigured()).toThrow(
 			/OIDC_ISSUER must be a valid URL.*OIDC_CLIENT_ID.*OIDC_CLIENT_SECRET.*SESSION_SECRET must be at least 32/,
 		);
+	});
+});
+
+describe("withinDeadline", () => {
+	test("passes work through without a deadline", async () => {
+		await expect(withinDeadline(Promise.resolve(1))).resolves.toBe(1);
+	});
+
+	test("rejects at once when the deadline has passed", async () => {
+		await expect(
+			withinDeadline(new Promise(() => {}), { deadline: 10 }, 20),
+		).rejects.toBeInstanceOf(OidcDeadlineError);
+	});
+
+	test("rejects hung work when the remaining time runs out", async () => {
+		vi.useFakeTimers();
+		const hung = withinDeadline(new Promise(() => {}), {
+			deadline: Date.now() + 1_000,
+		});
+		const settled = expect(hung).rejects.toBeInstanceOf(OidcDeadlineError);
+		await vi.advanceTimersByTimeAsync(1_000);
+		await settled;
+		vi.useRealTimers();
+	});
+
+	test("fails a callback whose provider exchange outlives the deadline", async () => {
+		oidc.authorizationCodeGrant.mockImplementationOnce(
+			() => new Promise(() => {}),
+		);
+		const auth = core();
+		const start = await auth.signIn(request("/"), new Map());
+		const state = new URL(start.url).searchParams.get("state") ?? "";
+		const jar = apply(new Map(), start.setCookies);
+
+		const result = await auth.callback(
+			request(
+				`/api/auth/callback?code=c&state=${encodeURIComponent(state)}`,
+				jar,
+			),
+			jar,
+			{ deadline: Date.now() + 20 },
+		);
+
+		expect(result).toMatchObject({ ok: false });
+		expect(result.ok || result.error).toBeInstanceOf(OidcDeadlineError);
 	});
 });

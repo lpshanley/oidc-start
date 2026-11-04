@@ -99,7 +99,7 @@ describe("session manager", () => {
 		]);
 
 		expect(refresh).toHaveBeenCalledOnce();
-		expect(refresh).toHaveBeenCalledWith("refresh", "alice");
+		expect(refresh).toHaveBeenCalledWith("refresh", "alice", undefined);
 		expect(first.session).toEqual({
 			...fresh,
 			user: { ...user, roles: ["stellar"] },

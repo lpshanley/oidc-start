@@ -1,5 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as client from "openid-client";
-import type { OidcConfiguration } from "./config.js";
+import type { OidcCallContext, OidcConfiguration } from "./config.js";
 import type { AuthUser } from "./models.js";
 
 // OpenID Connect operations over openid-client, standing in for the WorkOS
@@ -76,10 +77,44 @@ function tokenSet(
 /** Default timeout for each request to the provider. */
 export const PROVIDER_TIMEOUT_MS = 5_000;
 
+/** The provider has not received a token refresh request. */
+export class RefreshNotDispatched extends Error {}
 export function createProvider(
 	settings: OidcConfiguration,
 	timeoutMs = PROVIDER_TIMEOUT_MS,
 ) {
+	// The SDK caches discovery and JWKS clients and accepts a single transport hook.
+	// Only this transport adapter uses async-local state; domain callers pass context explicitly.
+	const transport = new AsyncLocalStorage<OidcCallContext | undefined>();
+	const refreshDispatch = new AsyncLocalStorage<{ sent: boolean }>();
+	const boundedFetch = (
+		url: string | URL,
+		init: RequestInit | client.CustomFetchOptions = {},
+	) => {
+		const call = transport.getStore();
+		const headers = new Headers(init.headers);
+		if (call?.correlationId) headers.set("x-request-id", call.correlationId);
+		const remaining = Math.min(
+			timeoutMs,
+			(call?.deadline ?? Infinity) - Date.now(),
+		);
+		if (remaining <= 0)
+			throw new DOMException("Operation deadline exceeded", "TimeoutError");
+		const signals = [AbortSignal.timeout(remaining)];
+		if (call?.signal) signals.push(call.signal);
+		if (init.signal) signals.push(init.signal);
+		const signal = AbortSignal.any(signals);
+		signal.throwIfAborted();
+		const attempt = refreshDispatch.getStore();
+		if (attempt) attempt.sent = true;
+		return fetch(url, {
+			...init,
+			body:
+				init.body instanceof Uint8Array ? new Uint8Array(init.body) : init.body,
+			headers,
+			signal,
+		});
+	};
 	let configuration: Promise<client.Configuration> | null = null;
 
 	function discover() {
@@ -95,6 +130,7 @@ export function createProvider(
 				settings.OIDC_CLIENT_SECRET,
 				undefined,
 				{
+					[client.customFetch]: boundedFetch,
 					timeout: Math.max(1, Math.ceil(timeoutMs / 1000)),
 					...(insecure ? { execute: [client.allowInsecureRequests] } : {}),
 				},
@@ -107,12 +143,26 @@ export function createProvider(
 	}
 
 	async function rotate(refreshToken: string) {
-		const config = await discover();
-		const response = await client.refreshTokenGrant(config, refreshToken);
+		const config = await discover().catch((error: unknown) => {
+			throw new RefreshNotDispatched("Discovery failed before token refresh", {
+				cause: error,
+			});
+		});
+		const attempt = { sent: false };
+		const response = await refreshDispatch.run(attempt, async () => {
+			try {
+				return await client.refreshTokenGrant(config, refreshToken);
+			} catch (error) {
+				if (attempt.sent) throw error;
+				throw new RefreshNotDispatched("Token refresh failed before dispatch", {
+					cause: error,
+				});
+			}
+		});
 		return { config, response };
 	}
 
-	return {
+	const api = {
 		async authorizationUrl({
 			redirectUri,
 			state,
@@ -204,6 +254,19 @@ export function createProvider(
 			return { ...tokenSet(response, refreshToken), roles };
 		},
 
+	};
+	return {
+		authorizationUrl: (
+			input: Parameters<typeof api.authorizationUrl>[0],
+			context?: OidcCallContext,
+		) => transport.run(context, () => api.authorizationUrl(input)),
+		exchangeCode: (
+			url: URL,
+			checks: Parameters<typeof api.exchangeCode>[1],
+			context?: OidcCallContext,
+		) => transport.run(context, () => api.exchangeCode(url, checks)),
+		refresh: (token: string, subject: string, context?: OidcCallContext) =>
+			transport.run(context, () => api.refresh(token, subject)),
 	};
 }
 

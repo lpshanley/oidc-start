@@ -1,3 +1,4 @@
+import type { OidcCallContext } from "./config.js";
 import { z } from "zod";
 import {
 	type CookieOptions,
@@ -82,6 +83,7 @@ export function createSessionManager({
 	function refreshOnce(
 		refreshToken: string,
 		sub: string,
+		context?: OidcCallContext,
 	) {
 		const now = Date.now();
 		for (const [token, entry] of refreshes) {
@@ -93,7 +95,7 @@ export function createSessionManager({
 		if (existing) return existing.result;
 		const entry: { result: Promise<RefreshedTokens>; settledAt?: number } = {
 			result: provider()
-				.refresh(refreshToken, sub)
+				.refresh(refreshToken, sub, context)
 				.then(
 					(tokens) => {
 						entry.settledAt = Date.now();
@@ -124,6 +126,8 @@ export function createSessionManager({
 	async function resolve(
 		cookies: Map<string, string>,
 		onRefreshError: (error: unknown) => void = () => {},
+		bound: <T>(work: Promise<T>) => Promise<T> = (work) => work,
+		context?: OidcCallContext,
 	): Promise<SessionResolution> {
 		const sealed = readChunked(cookies, name());
 		if (sealed === undefined) return { session: null, setCookies: [] };
@@ -163,7 +167,9 @@ export function createSessionManager({
 			return { session: null, setCookies: clear(cookies) };
 		}
 		try {
-			const { roles, ...tokens } = await refreshOnce(session.refreshToken, session.user.sub);
+			const { roles, ...tokens } = await bound(
+				refreshOnce(session.refreshToken, session.user.sub, context),
+			);
 			const refreshed: Session = {
 				...session,
 				...tokens,

@@ -26,7 +26,7 @@ const oidc = vi.hoisted(() => {
 });
 vi.mock("openid-client", () => oidc);
 
-const { createProvider } = await import("./provider.js");
+const { createProvider, RefreshNotDispatched } = await import("./provider.js");
 
 const settings = {
 	OIDC_ISSUER: "https://idp.test/application/o/sage/",
@@ -78,7 +78,7 @@ describe("provider", () => {
 			"sage-web",
 			"secret",
 			undefined,
-			{ timeout: 5 },
+			{ timeout: 5, [oidc.customFetch]: expect.any(Function) },
 		);
 		expect(Object.fromEntries(url.searchParams)).toEqual({
 			redirect_uri: "https://sage.test/api/auth/callback",
@@ -97,13 +97,16 @@ describe("provider", () => {
 			OIDC_ISSUER: "http://localhost:9000/",
 		});
 
+		await expect(local.refresh("r", "alice")).rejects.toThrow(
+			"Discovery failed",
+		);
+		oidc.refreshTokenGrant.mockResolvedValue(tokenResponse({}, undefined));
+		await local.refresh("r", "alice");
 
-		const input = { redirectUri: "https://sage.test/cb", state: "s", nonce: "n", codeVerifier: "v" };
-		await expect(local.authorizationUrl(input)).rejects.toThrow("down");
-		await local.authorizationUrl(input);
 		expect(oidc.discovery).toHaveBeenCalledTimes(2);
 		expect(oidc.discovery.mock.lastCall?.[4]).toEqual({
 			timeout: 5,
+			[oidc.customFetch]: expect.any(Function),
 			execute: [oidc.allowInsecureRequests],
 		});
 	});
@@ -266,4 +269,71 @@ test("re-reads roles on refresh, from the ID token or else userinfo", async () =
 	await expect(
 		createProvider(settings).refresh("r2", "alice"),
 	).resolves.toMatchObject({ roles: [] });
+});
+
+test("the cached provider transport uses each caller's remaining budget", async () => {
+	const provider = createProvider(settings);
+	const fetch = vi.fn(async () => new Response());
+	vi.stubGlobal("fetch", fetch);
+	try {
+		oidc.refreshTokenGrant.mockImplementation(async () => {
+			const options = oidc.discovery.mock.lastCall?.[4] as Record<
+				symbol,
+				typeof globalThis.fetch
+			>;
+			await options[oidc.customFetch]("https://idp.test/token", {});
+			return tokenResponse(
+				{ access_token: "fresh" },
+				{ sub: "alice", roles: ["member"] },
+			);
+		});
+		await provider.refresh("r", "alice", {
+			deadline: Date.now() + 1000,
+			correlationId: "one",
+		});
+		await provider.refresh("r", "alice", {
+			deadline: Date.now() + 1000,
+			correlationId: "two",
+		});
+		await expect(
+			provider.refresh("r", "alice", { deadline: Date.now() - 1 }),
+		).rejects.toThrow("before dispatch");
+		expect(fetch.mock.calls).toHaveLength(2);
+		expect(
+			vi
+				.mocked(globalThis.fetch)
+				.mock.calls.map(([, init]) =>
+					new Headers(init?.headers).get("x-request-id"),
+				),
+		).toEqual(["one", "two"]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+test("only failures before the refresh transport sends are safe to retry", async () => {
+	const provider = createProvider(settings);
+	const failure = new Error("connection closed before response");
+	const network = vi.fn().mockRejectedValue(failure);
+	vi.stubGlobal("fetch", network);
+	try {
+		oidc.refreshTokenGrant.mockImplementation(async () => {
+			const options = oidc.discovery.mock.lastCall?.[4] as Record<
+				symbol,
+				typeof globalThis.fetch
+			>;
+			vi.setSystemTime(Date.now() + 100);
+			await options[oidc.customFetch]("https://idp.test/token", {});
+		});
+		await expect(
+			provider.refresh("r", "alice", { deadline: Date.now() + 50 }),
+		).rejects.toBeInstanceOf(RefreshNotDispatched);
+		expect(network).not.toHaveBeenCalled();
+		await expect(
+			provider.refresh("r", "alice", { deadline: Date.now() + 500 }),
+		).rejects.toBe(failure);
+		expect(network).toHaveBeenCalledOnce();
+	} finally {
+		vi.unstubAllGlobals();
+	}
 });

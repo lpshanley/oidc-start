@@ -100,6 +100,8 @@ export function assertOidcConfigured(env: AuthEnvironment) {
  */
 export type OidcCallContext = {
 	correlationId?: string;
+	deadline?: number;
+	signal?: AbortSignal;
 };
 
 /** A failure the library recovered from or reported to the browser. */
