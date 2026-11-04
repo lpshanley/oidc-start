@@ -7,7 +7,7 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "verify": "turbo run typecheck test check-package",
+    "verify": "turbo run build typecheck test check-package",
     "changeset": "changeset",
     "version-packages": "changeset version"
   },

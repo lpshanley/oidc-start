@@ -1,5 +1,6 @@
 packages:
   - 'packages/*'
+  - 'examples/tanstack-start'
 
 catalogMode: prefer
 catalog:
@@ -9,6 +10,7 @@ catalog:
   '@types/node': '22.20.2'
   '@types/react': '^19.2.0'
   '@types/react-dom': '^19.2.0'
+  '@vitejs/plugin-react': '6.1.2'
   'iron-webcrypto': '2.0.0'
   'jose': '6.2.14'
   'openid-client': '6.8.8'
