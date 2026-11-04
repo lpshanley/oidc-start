@@ -85,6 +85,8 @@ export async function callback(request: Request) {
 
 On an ordinary request, `const { session, setCookies } = await auth.resolve(request)` gives you `session?.user`. Forward **each** returned `Set-Cookie` header separately, even on a signed-out response. A read can refresh a session or clear an expired cookie. Keep the full session on the server because it contains provider tokens. Browser code can use `AuthUser`, `displayName`, and `hasRole` from `@lpshanley/oidc-start-core/models`.
 
+If you use `provider.exchangeCode()` directly, import `isAuthorizationDenied` from `@lpshanley/oidc-start-core/provider` and pass it the caught error. It recognizes the provider’s `access_denied` response across bundles. Other responses, such as `login_required`, and network failures return `false`.
+
 ## End a session
 
 For browser sign-out, use a same-origin, CSRF-protected POST handler. Resolve the request, pass its `cookies` and `session` to `auth.signOut(request, cookies, session)`, append both sets of cookies as above, and redirect with **303** to the returned `location`. If recording the revocation throws, return a retryable error. The default session lasts up to 14 days and expires after 12 hours of inactivity.

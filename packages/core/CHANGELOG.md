@@ -2,10 +2,11 @@
 
 ## 0.1.0
 
-First stable release of the Node.js OIDC core. It adds two fixes since the last prerelease:
+First stable release of the Node.js OIDC core. Changes since the last prerelease:
 
 - Revocation lookups receive only the app session ID, subject, issue time, and optional provider session ID.
 - Providers without a UserInfo endpoint can sign users in using the email in the ID token. Missing roles resolve to an empty list at sign-in and refresh.
+- `isAuthorizationDenied(error)` from `@lpshanley/oidc-start-core/provider` recognizes a provider’s `access_denied` authorization response across bundles.
 
 The npm package declares MIT and includes the license text.
 
