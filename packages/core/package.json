@@ -9,6 +9,10 @@
       "types": "./dist/models.d.ts",
       "import": "./dist/models.js"
     },
+    "./provider": {
+      "types": "./dist/provider.d.ts",
+      "import": "./dist/provider.js"
+    },
     "./config": {
       "types": "./dist/config.d.ts",
       "import": "./dist/config.js"
@@ -32,6 +36,7 @@
   },
   "dependencies": {
     "iron-webcrypto": "catalog:",
+    "openid-client": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

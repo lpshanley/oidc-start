@@ -5,6 +5,7 @@ catalogMode: prefer
 catalog:
   '@types/node': '22.20.2'
   'iron-webcrypto': '2.0.0'
+  'openid-client': '6.8.8'
   'publint': '^0.3.0'
   'turbo': '2.11.10'
   'typescript': '6.0.3'
