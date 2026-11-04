@@ -21,8 +21,8 @@ export async function getSignInUrlBody(options?: SignInOptions) {
 	return url;
 }
 
-export async function signOutBody(): Promise<never> {
-	const result = await endSession();
+export async function signOutBody(everywhere = false): Promise<never> {
+	const result = await endSession(everywhere);
 	if (result instanceof Response) throw result;
 	throw redirect({ href: result, reloadDocument: true });
 }

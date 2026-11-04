@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { signInOptionsSchema } from "@lpshanley/oidc-start-core/models";
 
 // Server functions after WorkOS's server-functions.ts; bodies load lazily so
@@ -19,7 +20,9 @@ export const getSignInUrl = createServerFn({ method: "GET" })
 	});
 
 /** Clears the session and redirects to provider logout. In a component, call via useServerFn. */
-export const signOut = createServerFn({ method: "POST" }).handler(async () => {
-	const { signOutBody } = await import("./functions.server.js");
-	return signOutBody();
-});
+export const signOut = createServerFn({ method: "POST" })
+	.validator(z.object({ everywhere: z.boolean().optional() }).optional())
+	.handler(async ({ data }) => {
+		const { signOutBody } = await import("./functions.server.js");
+		return signOutBody(data?.everywhere);
+	});

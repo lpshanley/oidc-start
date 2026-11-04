@@ -310,7 +310,7 @@ describe("server function bodies", () => {
 		);
 	});
 
-	test("signOut queues the cleared session and throws a document redirect", async () => {
+	test.each([undefined, true])("signOut forwards everywhere=%s and follows provider logout", async (everywhere) => {
 		const appended = context();
 		core.signOut.mockResolvedValue({
 			location: "https://idp.test/logout",
@@ -318,9 +318,10 @@ describe("server function bodies", () => {
 		});
 
 		const thrown = await functions
-			.signOutBody()
+			.signOutBody(everywhere)
 			.catch((error: unknown) => error);
 
+		expect(core.signOut.mock.lastCall?.[4]).toBe(everywhere ?? false);
 		expect(appended).toEqual(["s=; Max-Age=0"]);
 		expect(thrown).toMatchObject({
 			options: { href: "https://idp.test/logout", reloadDocument: true },

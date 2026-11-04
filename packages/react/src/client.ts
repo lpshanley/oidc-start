@@ -20,6 +20,6 @@ export function useAuth() {
 		async signIn(options?: SignInOptions) {
 			window.location.assign(await getSignInUrl({ data: options }));
 		},
-		signOut: () => signOutAndRedirect(),
+		signOut: (options?: { everywhere?: boolean }) => signOutAndRedirect({ data: options }),
 	};
 }
