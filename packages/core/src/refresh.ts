@@ -1,60 +1,77 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { RefreshedTokens } from "./provider.js";
+import { RefreshNotDispatched, type RefreshedTokens } from "./provider.js";
 import type { Session } from "./session.js";
 import { sealValue, unsealValue } from "./seal.js";
 
-/** Reuse a recent refresh when a concurrent request still has the old cookie. */
 export const RECENT_REFRESH_MS = 10_000;
+export type RefreshCoordinationResult =
+	| { status: "ready"; sealedResult: string }
+	| { status: "busy" }
+	| { status: "reauth_required" };
 
-/** Coordinate a session refresh across replicas of one app. Times named "until" are epoch seconds. */
+/** Shared rotation ownership. Reserve before dispatch, retain spent keys until expiry. */
 export interface SessionRefreshCoordinator {
-	/**
-	 * Atomically reserve the key before calling produce. Keep the reservation through
-	 * until, even if the outcome is unknown. Concurrent callers may reuse the sealed
-	 * result for reuseMs after completion. Return null for a spent key or wait timeout.
-	 */
 	run(
 		request: { key: string; until: number; reuseMs: number },
 		produce: () => Promise<string>,
-	): Promise<string | null>;
+	): Promise<RefreshCoordinationResult>;
+}
+
+/** One process only. Production replicas must use the same durable coordinator. */
+export function createMemoryRefreshCoordinator(now = Date.now): SessionRefreshCoordinator {
+	type Entry = { until: number; result: Promise<RefreshCoordinationResult>; completedAt?: number };
+	const entries = new Map<string, Entry>();
+	return {
+		async run({ key, until, reuseMs }, produce) {
+			for (const [id, entry] of entries) if (entry.until * 1000 <= now()) entries.delete(id);
+			const existing = entries.get(key);
+			if (existing) {
+				if (existing.completedAt !== undefined && now() >= existing.completedAt + reuseMs) return { status: "reauth_required" };
+				return existing.result;
+			}
+			const entry: Entry = { until, result: Promise.resolve().then(produce).then(
+				(sealedResult): RefreshCoordinationResult => {
+					entry.completedAt = now();
+					return { status: "ready", sealedResult };
+				},
+				(error: unknown): RefreshCoordinationResult => {
+					if (error instanceof RefreshNotDispatched) { entries.delete(key); throw error; }
+					entry.completedAt = now();
+					return { status: "reauth_required" };
+				},
+			) };
+			entries.set(key, entry);
+			return entry.result;
+		},
+	};
 }
 
 const refreshResult = z.object({
-	key: z.string(),
-	useBefore: z.number(),
+	key: z.string(), useBefore: z.number(),
 	tokens: z.object({
-		accessToken: z.string().min(1),
-		refreshToken: z.string().min(1).optional(),
-		idToken: z.string().min(1).optional(),
-		expiresAt: z.number(),
-		refreshExpiresAt: z.number().optional(),
-		roles: z.array(z.string()),
+		accessToken: z.string().min(1), refreshToken: z.string().min(1).optional(),
+		idToken: z.string().min(1).optional(), expiresAt: z.number(),
+		refreshExpiresAt: z.number().optional(), roles: z.array(z.string()),
 		email: z.string().min(1).optional(),
 	}),
 });
 
-export async function sharedRefresh(
-	coordinator: SessionRefreshCoordinator,
-	{ session, until, password, refresh }: {
-		session: Session;
-		until: number;
-		password: string;
-		refresh: () => Promise<RefreshedTokens>;
-	},
-) {
-	// Some providers return the same refresh token on successive renewals.
-	// Each generation gets its own reservation within this sign-in.
+export async function sharedRefresh(coordinator: SessionRefreshCoordinator, {
+	session, until, password, refresh,
+}: { session: Session; until: number; password: string; refresh: () => Promise<RefreshedTokens> }) {
 	const key = createHash("sha256").update(JSON.stringify([
-		session.sid, session.user.sub, session.refreshGeneration ?? 0, session.refreshToken,
+		session.user.issuer, session.clientId, session.sid, session.user.sub,
+		session.refreshGeneration ?? 0, session.refreshToken,
 	])).digest("hex");
-	const ttl = RECENT_REFRESH_MS / 1000;
-	const sealed = await coordinator.run({ key, until, reuseMs: RECENT_REFRESH_MS }, async () => {
+	const result = await coordinator.run({ key, until, reuseMs: RECENT_REFRESH_MS }, async () => {
 		const tokens = await refresh();
-		return sealValue({ key, tokens, useBefore: Date.now() + RECENT_REFRESH_MS }, password, ttl);
+		return sealValue({ key, tokens, useBefore: Date.now() + RECENT_REFRESH_MS }, password, RECENT_REFRESH_MS / 1000);
 	});
-	if (sealed === null) return null;
-	const result = refreshResult.parse(await unsealValue(sealed, password, ttl));
-	if (result.key !== key) throw new Error("Mismatched session refresh result");
-	return Date.now() < result.useBefore ? result.tokens : null;
+	if (result.status !== "ready") return result;
+	try {
+		const decoded = refreshResult.parse(await unsealValue(result.sealedResult, password, RECENT_REFRESH_MS / 1000));
+		if (decoded.key === key && Date.now() < decoded.useBefore) return { status: "ready" as const, tokens: decoded.tokens };
+	} catch { /* An expired or mismatched result never authorizes a request. */ }
+	return { status: "reauth_required" as const };
 }

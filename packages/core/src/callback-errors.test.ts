@@ -21,7 +21,7 @@ test.each(["session", "grant"])("%s callback verifies browser state before retur
 			SESSION_SECRET: "test-only-session-secret-at-least-32-characters",
 		}),
 		allowSession: () => true,
-		revocations: { isRevoked: vi.fn(), revoke: vi.fn(), revokeAllFor: vi.fn(), revokeIdpSession: vi.fn() },
+		registry: { isActive: vi.fn(), register: vi.fn(), end: vi.fn(), endAll: vi.fn(), applyLogout: vi.fn() },
 	});
 	const request = new Request("https://app.test/");
 	const begin = purpose === "session" ? auth.signIn : auth.startGrant;

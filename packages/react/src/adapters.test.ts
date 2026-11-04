@@ -12,6 +12,7 @@ const start = vi.hoisted(() => ({
 		  }) => Promise<unknown>),
 	context: undefined as OidcContext | undefined,
 	setResponseHeader: vi.fn(),
+	setResponseStatus: vi.fn(),
 	appendResponseHeader: vi.fn(),
 }));
 vi.mock("@tanstack/react-start", () => ({
@@ -25,6 +26,7 @@ vi.mock("@tanstack/react-start", () => ({
 }));
 vi.mock("@tanstack/react-start/server", () => ({
 	setResponseHeader: start.setResponseHeader,
+	setResponseStatus: start.setResponseStatus,
 	appendResponseHeader: start.appendResponseHeader,
 }));
 
@@ -45,7 +47,7 @@ const { oidcMiddleware } = await import("./middleware.js");
 const routes = await import("./routes.server.js");
 const functions = await import("./functions.server.js");
 
-const alice = { sub: "alice", email: "alice@sage.test", name: "Alice" };
+const alice = { issuer: "https://idp.test/application/o/sage/", sub: "alice", email: "alice@sage.test", name: "Alice" };
 
 function context(overrides: Partial<OidcContext> = {}) {
 	const appended: string[] = [];
@@ -55,7 +57,7 @@ function context(overrides: Partial<OidcContext> = {}) {
 		cookies: new Map(),
 		session: null,
 		call: { correlationId: "req-1" },
-		auth: () => ({ user: null }),
+		auth: () => ({ status: "anonymous", user: null }),
 		appendSetCookie: (line) => appended.push(line),
 		...overrides,
 	};
@@ -71,7 +73,7 @@ describe("oidcMiddleware", () => {
 		oidcMiddleware({ core: () => core as unknown as OidcContext["core"] });
 		core.resolve.mockResolvedValue({
 			cookies: new Map([["a", "1"]]),
-			session: { user: alice },
+			session: { user: alice }, status: "authenticated",
 			setCookies: ["sage_session=refreshed"],
 		});
 		const request = new Request("https://sage.test/");
@@ -84,7 +86,7 @@ describe("oidcMiddleware", () => {
 			next: async (options) => {
 				const { oidc } = (options as { context: { oidc: OidcContext } })
 					.context;
-				expect(oidc.auth()).toEqual({ user: alice });
+				expect(oidc.auth()).toEqual({ status: "authenticated", user: alice, reason: undefined });
 				expect(oidc.request).toBe(request);
 				expect(oidc.call).toEqual({ correlationId: "req-1", deadline: 5 });
 				oidc.appendSetCookie("sage-verifier-1=x");
@@ -129,7 +131,7 @@ describe("oidcMiddleware", () => {
 	test("a successful account switch supersedes all writes for the old session", async () => {
 		oidcMiddleware({ core: () => core as unknown as OidcContext["core"] });
 		core.resolve.mockResolvedValueOnce({
-			cookies: new Map([["s.0", "old-chunk"]]), session: { user: alice },
+			cookies: new Map([["s.0", "old-chunk"]]), session: { user: alice }, status: "authenticated",
 			setCookies: ["s=alice", "s.0=; Max-Age=0"],
 		});
 		const newSession = ["s.0=bob-0", "s.1=bob-1", "v=; Max-Age=0"];
@@ -298,7 +300,7 @@ describe("route handlers", () => {
 			expect.any(Map),
 			{ user: alice },
 			{ correlationId: "req-1" },
-			false,
+			{ everywhere: false },
 		);
 		expect(appended).toEqual(["s=; Max-Age=0"]);
 	});
@@ -338,13 +340,13 @@ test("recent auth uses the provider login time, including the boundary, and fail
 describe("server function bodies", () => {
 	test("recent auth returns only a fresh user", () => {
 		const authTime = Math.floor(Date.now() / 1000) - 60;
-		context({ session: { authTime } as OidcContext["session"], auth: () => ({ user: alice }) });
+		context({ session: { authTime } as OidcContext["session"], auth: () => ({ status: "authenticated", user: alice }) });
 		expect(functions.getRecentAuthBody(300)).toEqual({ user: alice });
 		expect(functions.getRecentAuthBody(30)).toEqual({ user: null });
 	});
 
 	test("getAuth returns only the user and is not cached", () => {
-		context({ auth: () => ({ user: alice }) });
+		context({ auth: () => ({ status: "authenticated", user: alice }) });
 
 		expect(functions.getAuthBody()).toEqual({ user: alice });
 		expect(start.setResponseHeader).toHaveBeenCalledWith(
@@ -361,13 +363,22 @@ describe("server function bodies", () => {
 		});
 
 		const thrown = await functions
-			.signOutBody(everywhere)
+			.signOutBody({ everywhere })
 			.catch((error: unknown) => error);
 
-		expect(core.signOut.mock.lastCall?.[4]).toBe(everywhere ?? false);
+		expect(core.signOut.mock.lastCall?.[4]).toEqual({ everywhere });
 		expect(appended).toEqual(["s=; Max-Age=0"]);
 		expect(thrown).toMatchObject({
 			options: { href: "https://idp.test/logout", reloadDocument: true },
 		});
 	});
+});
+
+test.each(["denied", "unavailable"] as const)("getAuth surfaces %s without pretending the user is signed out", async status => {
+	context({ auth: () => ({ status, user: null, reason: status === "denied" ? "access_denied" : "registry_unavailable" }) });
+	const response = await Promise.resolve().then(() => functions.getAuthBody()).catch((error: unknown) => error);
+	expect(response).toBeInstanceOf(Error);
+	expect((response as Response).status).toBe(status === "denied" ? 403 : 503);
+	expect(start.setResponseStatus).toHaveBeenCalledWith(status === "denied" ? 403 : 503);
+	expect(start.setResponseHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
 });

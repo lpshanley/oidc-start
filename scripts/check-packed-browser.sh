@@ -24,5 +24,6 @@ overrides:
 YAML
 cd "$consumer/$example"
 pnpm install --no-frozen-lockfile --prefer-offline
+cp e2e/auth-fixture.ts src/auth.server.ts
 pnpm build
-pnpm exec playwright test
+OIDC_PACKED_FAULTS=1 pnpm exec playwright test

@@ -4,10 +4,10 @@ OpenID Connect sign-in and app-managed grants for Node.js, with a TanStack Start
 
 | Package | Public entries |
 | --- | --- |
-| `@lpshanley/oidc-start-core` | The root exports `createOidcCore`, session types and the revocation contract. Use `/models` for browser-safe user models and `/config` or `/provider` for server configuration and provider calls. |
+| `@lpshanley/oidc-start-core` | The root exports `createOidcCore`, session types and the session registry contract. Use `/models` for browser-safe user models and `/config` or `/provider` for server configuration and provider calls. |
 | `@lpshanley/oidc-start-react` | Use `/client` for `AuthProvider`, `useAuth`, `useUser`, `SignedIn` and `SignedOut`. Use `/functions` for browser-callable server functions and route guards, and `/server` for the core and request context. The package root exports user models, display and error helpers, middleware and HTTP route handlers. |
 
-The host app decides which accounts may hold a session, supplies persistent revocation storage and registers its callback URLs with the provider. The React adapter uses the host's TanStack Start and Router installations.
+The host app decides which accounts may hold a session, supplies a persistent session registry and registers its callback URLs with the provider. The React adapter uses the host's TanStack Start and Router installations.
 
 For deployment, see the [production guide](docs/production.md), [PostgreSQL example](examples/postgres/README.md) and [security reporting policy](SECURITY.md).
 
@@ -49,8 +49,8 @@ Keep both archives with the app's manifest and lockfile so CI can run a frozen i
 ## Wire up sign-in
 
 1. **Register the OIDC client.** Use a confidential client with the authorization code flow and PKCE. For a local app served at `http://localhost:5173`, the example's callback URL is `http://localhost:5173/callback` and its post-logout URL is `http://localhost:5173/`. Register the corresponding public HTTPS URLs in production.
-2. **Configure the server environment.** Set `APP_ORIGIN` to the app's origin, `OIDC_ISSUER` to the provider's issuer URL, and `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` to the registered credentials. Generate `SESSION_SECRET` once with `openssl rand -hex 32` and persist it across restarts and server instances. The default scopes are `openid profile email offline_access`. The provider must supply an email in the ID token or via UserInfo.
-3. **Compose the core on the server.** Start from [auth.server.ts](examples/tanstack-start/src/auth.server.ts). Keep `callbackPath` and `postLogoutPath` aligned with the registered URLs. Set `allowSession` to the host's access policy. For production, implement [SessionRevocations](packages/core/src/revocation.ts) with storage shared by every instance. The example's in-memory implementation is for local development. The [core guide](packages/core/README.md) shows a role-based policy and configuration validation.
+2. **Configure the server environment.** Set `APP_ORIGIN` to the app's origin, `OIDC_ISSUER` to the provider's issuer URL, and `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` to the registered credentials. Generate `SESSION_SECRET` once with `openssl rand -hex 32` and persist it across restarts and server instances. The default scopes are `openid profile email offline_access`. Email is optional. Offline access requests consent unless the host documents a preauthorization basis.
+3. **Compose the core on the server.** Start from [auth.server.ts](examples/tanstack-start/src/auth.server.ts). Keep `callbackPath` and `postLogoutPath` aligned with the registered URLs. Set `allowSession` to the host's access policy. For production, implement [SessionRegistry](packages/core/src/registry.ts) with storage shared by every instance. The example's in-memory implementation is for local development. The [core guide](packages/core/README.md) shows a role-based policy and configuration validation.
 4. **Register middleware and the callback.** Copy the middleware order in [src/start.ts](examples/tanstack-start/src/start.ts). A custom Start instance must register `createCsrfMiddleware({ filter: (ctx) => ctx.handlerType === "serverFn" })` before `oidcMiddleware({ core: createServerOnlyFn(() => auth) })` to protect browser RPCs, including sign-out. Mount `GET: handleCallbackRoute()` at [src/routes/callback.ts](examples/tanstack-start/src/routes/callback.ts). Keeping core creation inside a server module lets the browser import the adapter safely.
 5. **Connect the UI.** In the root route, set `loader: () => getAuth()` using `getAuth` from `@lpshanley/oidc-start-react/functions`. Wrap `<Outlet />` in `<AuthProvider auth={Route.useLoaderData()}>`. Import `AuthProvider` and `useAuth` from `@lpshanley/oidc-start-react/client`. The home page reads `user` and calls `signIn()` or `signOut()` through the hook. [Root route](examples/tanstack-start/src/routes/__root.tsx) · [Home page](examples/tanstack-start/src/routes/index.tsx)
 6. **Protect a route when needed.** Mount `GET: handleSignInRoute()` at `/sign-in` and call `requireAuth` or `requireRecentAuth` from the protected route's `beforeLoad`. Check authorization again in the server handler for private data or sensitive actions. [Account route](examples/tanstack-start/src/routes/account.tsx) · [Recent-login route](examples/tanstack-start/src/routes/settings.tsx) · [Adapter guide](packages/react/README.md)
@@ -65,11 +65,11 @@ The `/admin` example checks the current user's role after sign-in and sends user
 
 When upgrading the React adapter from 0.3.x to 0.4.0, rename the `OidcAuthProvider` import and JSX tags to `AuthProvider`. Continue importing it from `@lpshanley/oidc-start-react/client` and pass the root loader result as its `auth` prop.
 
-Replace middleware and route imports from the old application packages with `@lpshanley/oidc-start-react`. Import `createOidcCore` and `getOidcContext` from `@lpshanley/oidc-start-react/server`. Each host supplies `allowSession` and a revocation store explicitly.
+Replace middleware and route imports from the old application packages with `@lpshanley/oidc-start-react`. Import `createOidcCore` and `getOidcContext` from `@lpshanley/oidc-start-react/server`. Each host supplies a shared registry and may supply `allowSession` for admission policy.
 
 Apps upgrading from the 0.1.0 React adapter can move imports from `@lpshanley/oidc-start-core/models` to the React package root and imports from the core package root to `@lpshanley/oidc-start-react/server`. Once the app has no direct core imports, remove its direct core dependency.
 
-Stellar can keep its cookie prefix, sealing secret, access policy and revocation adapter. Great Sage's older cookie format lacks the session ID and timestamps used for revocation and idle expiry. Plan for users to sign in again when switching from that format. Great Sage's independent provider grants use `startGrant`, `finishGrant` and `refreshGrant`; grant storage and authorization belong to the host.
+For 0.5, replace the revocation adapter with an active-session registry and coordinate a browser-session cutover. Review [migration instructions](docs/migration-0.5.md), including cookie invalidation, independent grants, authentication outcomes, and consent handling. Host-managed grants still use `startGrant`, `finishGrant` and `refreshGrant`; storage and authorization belong to the host.
 
 ## Development
 
@@ -82,7 +82,7 @@ pnpm verify
 
 Turbo builds core before the adapter. Verification typechecks both packages, runs the in-process auth tests, checks the distributable packages with publint, and builds the TanStack Start example against their public exports. The example checks every emitted client chunk, including lazy routes. The browser must contain the adapter's callable functions and keep the server implementations, OIDC provider, and session cryptography out of the bundle.
 
-Run `pnpm --filter oidc-start-example dev` after verification to try the example. The home page works without credentials. For sign-in, supply the environment variables listed in the core README, set `APP_ORIGIN` to the dev server origin and register `/callback` on that origin with your provider. The example admits any authenticated user and keeps revocations in memory for local development.
+Run `pnpm --filter oidc-start-example dev` after verification to try the example. The home page works without credentials. For sign-in, supply the environment variables listed in the core README, set `APP_ORIGIN` to the dev server origin and register `/callback` on that origin with your provider. The example admits any authenticated user and keeps active sessions in memory for local development.
 
 ## Releases
 

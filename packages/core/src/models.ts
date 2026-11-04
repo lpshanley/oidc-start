@@ -1,18 +1,32 @@
 import { z } from "zod";
 
+const promptValues = new Set(["none", "login", "consent", "select_account"]);
+export const promptSchema = z.string().trim().min(1).refine((value) => {
+	const values = value.split(/\s+/);
+	return values.every((v) => promptValues.has(v)) && new Set(values).size === values.length
+		&& (!values.includes("none") || values.length === 1);
+}, "Invalid OIDC prompt combination");
+
+export const signOutOptionsSchema = z.object({
+	everywhere: z.boolean().optional(),
+	providerLogout: z.boolean().optional(),
+});
+export type SignOutOptions = z.infer<typeof signOutOptionsSchema>;
+
 /** Options for a single authorization request. Omit prompt to allow provider SSO. */
 export const signInOptionsSchema = z.object({
 	returnPathname: z.string().optional(),
 	/** Maximum authentication age in seconds. Zero requests a fresh login. */
 	maxAge: z.number().int().nonnegative().optional(),
 	loginHint: z.string().min(1).optional(),
-	prompt: z.enum(["none", "login", "consent", "select_account"]).optional(),
+	prompt: promptSchema.optional(),
 });
 export type SignInOptions = z.infer<typeof signInOptionsSchema>;
 
 export const authUserSchema = z.object({
+	issuer: z.url(),
 	sub: z.string().min(1),
-	email: z.string().min(1),
+	email: z.string().min(1).optional(),
 	name: z.string().nullable(),
 	/** Profile image URL from the OIDC `picture` claim; absent when not provided. */
 	picture: z
@@ -44,7 +58,7 @@ export function hasRole(user: AuthUser, role: string) {
 
 export function displayName(user: AuthUser) {
 	const name = user.name?.trim();
-	return name && name.length > 0 ? name : user.email;
+	return name && name.length > 0 ? name : user.email ?? "Account";
 }
 
 export function initials(user: AuthUser) {

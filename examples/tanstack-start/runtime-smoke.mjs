@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { handleCallbackRoute, hasRole, oidcMiddleware } from "@lpshanley/oidc-start-react";
-import { createOidcCore } from "@lpshanley/oidc-start-react/server";
+import { createOidcCore, createMemorySessionRegistry } from "@lpshanley/oidc-start-react/server";
 
 const core = createOidcCore({
 	environment: () => ({
@@ -11,7 +11,7 @@ const core = createOidcCore({
 		SESSION_SECRET: "local-runtime-smoke-test-secret-32-chars",
 	}),
 	allowSession: user => hasRole(user, "member"),
-	revocations: { isRevoked: async () => false },
+	registry: createMemorySessionRegistry(),
 });
 core.assertConfigured();
 assert.equal((await core.resolve(new Request("https://app.example.test/"))).session, null);

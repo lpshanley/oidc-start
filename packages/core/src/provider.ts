@@ -3,7 +3,7 @@ import { createRemoteJWKSet, jwtVerify, customFetch as jwksFetch } from "jose";
 import * as client from "openid-client";
 import type { OidcCallContext, OidcConfiguration } from "./config.js";
 import { LOGOUT_TOKEN_MAX_AGE_SECONDS, LogoutTokenError, logoutTarget } from "./logout-token.js";
-import type { AuthUser, SignInOptions } from "./models.js";
+import { promptSchema, type AuthUser, type SignInOptions } from "./models.js";
 
 // OpenID Connect operations over openid-client, standing in for the WorkOS
 // user-management calls in authkit-session (authorization URL, code exchange,
@@ -96,6 +96,7 @@ export function isAuthorizationDenied(error: unknown): boolean {
 export function createProvider(
 	settings: OidcConfiguration,
 	timeoutMs = PROVIDER_TIMEOUT_MS,
+	offlineAccessConsent: "prompt" | "preauthorized" = "prompt",
 ) {
 	// The SDK caches discovery and JWKS clients and accepts a single transport hook.
 	// Only this transport adapter uses async-local state; domain callers pass context explicitly.
@@ -192,11 +193,16 @@ export function createProvider(
 			nonce: string;
 			codeVerifier: string;
 		} & Pick<SignInOptions, "loginHint" | "prompt" | "maxAge">) {
+			let prompts = prompt === undefined ? [] : promptSchema.parse(prompt).split(/\s+/);
+			if (settings.OIDC_SCOPES.split(/\s+/).includes("offline_access") && offlineAccessConsent === "prompt") {
+				if (prompts.includes("none")) throw new Error("offline_access requires consent or an established preauthorization basis");
+				prompts = [...new Set([...prompts, "consent"])];
+			}
 			return client.buildAuthorizationUrl(await discover(), {
 				redirect_uri: redirectUri,
 				scope: settings.OIDC_SCOPES,
 				...(loginHint && { login_hint: loginHint }),
-				...(prompt && { prompt }),
+				...(prompts.length > 0 && { prompt: prompts.join(" ") }),
 				...(maxAge !== undefined && { max_age: String(maxAge) }),
 				state,
 				nonce,
@@ -239,11 +245,11 @@ export function createProvider(
 				);
 				email = email ?? firstString(info.email);
 			}
-			if (!email) throw new Error("Provider returned no email");
 			return {
 				user: {
+					issuer: settings.OIDC_ISSUER,
 					sub: claims.sub,
-					email,
+					...(email && { email }),
 					name: firstString(
 						claims.name,
 						info?.name,
@@ -302,7 +308,8 @@ export function createProvider(
 				issuer: metadata.issuer,
 				audience: settings.OIDC_CLIENT_ID,
 				maxTokenAge: LOGOUT_TOKEN_MAX_AGE_SECONDS,
-					requiredClaims: ["exp", "jti"],
+				algorithms: (metadata.id_token_signing_alg_values_supported ?? ["RS256"]).filter((alg) => alg !== "none"),
+				requiredClaims: ["exp", "jti"],
 			});
 			return logoutTarget(payload);
 		},

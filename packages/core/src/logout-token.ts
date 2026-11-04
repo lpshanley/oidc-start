@@ -28,7 +28,7 @@ export function isInvalidLogoutToken(error: unknown) {
 }
 
 /** Which sign-ins a logout token ends: one provider session, or all of a user's. */
-export type LogoutTarget = ({ sid: string } | { sub: string }) & { issuedAt: number };
+export type LogoutTarget = ({ sid: string; sub?: string } | { sub: string; sid?: never }) & { issuedAt: number; expiresAt: number; jti: string };
 
 export function logoutTarget(payload: JWTPayload): LogoutTarget {
 	const events = payload.events;
@@ -53,10 +53,11 @@ export function logoutTarget(payload: JWTPayload): LogoutTarget {
 	if (typeof payload.jti !== "string" || !payload.jti.trim()) {
 		throw new LogoutTokenError("The logout token has no token ID");
 	}
-	const issuedAt = payload.iat;
+	if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) throw new LogoutTokenError("Missing expiry");
+	const event = { issuedAt: payload.iat, expiresAt: payload.exp, jti: payload.jti };
 	const sid = typeof payload.sid === "string" ? payload.sid : "";
-	if (sid) return { sid, issuedAt };
 	const sub = typeof payload.sub === "string" ? payload.sub : "";
-	if (sub) return { sub, issuedAt };
+	if (sid) return { ...event, sid, ...(sub && { sub }) };
+	if (sub) return { ...event, sub };
 	throw new LogoutTokenError("The token names neither a session nor a user");
 }

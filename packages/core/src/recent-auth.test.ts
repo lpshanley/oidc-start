@@ -27,7 +27,7 @@ test("binds max_age to the flow and uses the validated ID token's auth_time", as
 			SESSION_SECRET: "test-only-session-secret-at-least-32-characters",
 		}),
 		allowSession: () => true,
-		revocations: { isRevoked: async () => false, revoke: vi.fn(), revokeAllFor: vi.fn(), revokeIdpSession: vi.fn() },
+		registry: { isActive: async () => true, register: vi.fn(), end: vi.fn(), endAll: vi.fn(), applyLogout: vi.fn() },
 	});
 	const request = new Request("https://app.test/");
 	for (const [time, maxAge, shouldPass] of [

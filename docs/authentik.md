@@ -1,5 +1,50 @@
 # Authentik interoperability
 
+## 0.5.0 session registry
+
+On November 4, 2026, the 0.5.0 candidate passed the opt-in check in
+`examples/postgres/authentik-check.mjs` with Authentik **2026.8.5**, PostgreSQL
+**16**, Chromium, and two independent core instances with separate database pools.
+The release tag `v0.5.0` identifies the tested implementation; the release workflow
+also checks the exact packed core and React archives in development and production.
+
+The check uses Authentik's default implicit-consent authorization flow and
+**default provider invalidation flow**, with back-channel logout enabled. It
+verifies automatic protected-route sign-in, `prompt=consent` for offline access,
+shared rotating refresh, actual provider back-channel delivery, rejection of a
+saved cookie after logout, immediate sign-in with the **same provider sid**, and
+duplicate delivery leaving the newly registered session active. Tokens and session
+identifiers are compared in memory, never printed.
+
+Authentik's default invalidation flow displays its logout page while keeping its
+main SSO session. The browser check explicitly returns to the application from
+that page, then starts authorization again. It does not change Authentik's flow,
+force `prompt=login`, or suppress automatic sign-in. A provider requiring consent
+or another interaction remains free to display it. The library sends the consent
+prompt; Authentik's configured authorization flow controls its consent UI.
+
+To repeat, start disposable Authentik 2026.8.5 server/worker containers with
+PostgreSQL, expose Authentik on `localhost:19871`, and enable its default blueprints.
+Pipe `examples/postgres/authentik-fixture.py` into `ak shell` in that disposable
+server. The script creates a fixture client and user with **test-only credentials**,
+25-second access tokens, strict callback URLs, and a back-channel URL using
+`host.docker.internal:19872`. On Linux, supply that Docker host mapping. Do not
+run the provisioning script against an existing or production provider.
+
+Build the library and install Chromium, then run:
+
+```sh
+TEST_DATABASE_URL=postgres://... pnpm --filter oidc-start-postgres-example exec node authentik-check.mjs
+```
+
+Use a disposable database. The check creates an isolated schema, starts a local
+HTTP fixture on port 19872, and removes its schema at completion. The PostgreSQL
+contract checks run separately with `pnpm --filter oidc-start-postgres-example
+test:postgres`. The packed-package React browser tests use `oidc-provider`; they
+are complementary to this real Authentik test.
+
+## Historical 0.1.0 check
+
 The 0.1.0 release candidate was exercised on November 4, 2026 with Authentik 2026.8.5, PostgreSQL 16 and Chromium. The test used a disposable Authentik instance, a confidential client and the TanStack Start example.
 
 | Path | Observed result |

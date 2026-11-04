@@ -1,5 +1,13 @@
 # @lpshanley/oidc-start-core
 
+## 0.5.0
+
+### Minor Changes
+
+- Replace lasting session revocations with a scoped active-session registry. Logout ends existing application sessions and deduplicates provider events without prohibiting later authorization using the same provider session ID. Distinguish anonymous, denied, and unavailable session outcomes, and coordinate refreshes without replaying uncertain rotations.
+
+  Add issuer identity, optional email, optional host admission policy, standard prompt combinations and explicit offline-access consent handling. Validate logout signing algorithms against discovery metadata and follow OIDC back-channel response statuses. Introduce configurable local/provider logout and update both adapters and storage examples. See docs/migration-0.5.md before upgrading: this release changes storage contracts and requires a coordinated browser-session cutover.
+
 ## 0.4.3
 
 ### Patch Changes
