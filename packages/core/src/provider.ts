@@ -207,7 +207,7 @@ export function createProvider(
 			let email = firstString(claims.email);
 			const tokenRoles = roleList(claims[settings.OIDC_ROLES_CLAIM]);
 			let info: client.UserInfoResponse | undefined;
-			if (!email || tokenRoles === undefined) {
+			if ((!email || tokenRoles === undefined) && config.serverMetadata().userinfo_endpoint) {
 				info = await client.fetchUserInfo(
 					config,
 					response.access_token,
@@ -246,15 +246,15 @@ export function createProvider(
 					error: "invalid_grant",
 				});
 			let roles = roleList(claims?.[settings.OIDC_ROLES_CLAIM]);
-			if (roles === undefined) {
+			if (roles === undefined && config.serverMetadata().userinfo_endpoint) {
 				const info = await client.fetchUserInfo(
 					config,
 					response.access_token,
 					sub,
 				);
-				roles = roleList(info[settings.OIDC_ROLES_CLAIM]) ?? [];
+				roles = roleList(info[settings.OIDC_ROLES_CLAIM]);
 			}
-			return { ...tokenSet(response, refreshToken), roles };
+			return { ...tokenSet(response, refreshToken), roles: roles ?? [] };
 		},
 
 		/**

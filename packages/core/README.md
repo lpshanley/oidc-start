@@ -21,7 +21,7 @@ Register a **confidential web client** with your OIDC provider. For the example 
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | The credentials issued to your web client. |
 | `SESSION_SECRET` | Generate once with `openssl rand -hex 32`. Keep the same secret across restarts and server instances. |
 | `OIDC_SCOPES` | Optional. Defaults to `openid profile email offline_access`. The provider must supply an email in the ID token or through UserInfo. |
-| `OIDC_ROLES_CLAIM` | Optional. Defaults to `roles`. Set this to the claim your provider uses if your policy checks roles. |
+| `OIDC_ROLES_CLAIM` | Optional. Defaults to `roles`. If the ID token omits this claim, the core checks UserInfo when the provider advertises it. Without either source, your policy receives an empty role list. |
 
 ## Create the core
 
