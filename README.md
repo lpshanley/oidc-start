@@ -24,7 +24,7 @@ pnpm install --frozen-lockfile
 pnpm verify
 ```
 
-Turbo builds core before the adapter. Verification typechecks both packages, runs the in-process auth tests, checks the distributable packages with publint, and builds the TanStack Start example against their public exports.
+Turbo builds core before the adapter. Verification typechecks both packages, runs the in-process auth tests, checks the distributable packages with publint, and builds the TanStack Start example against their public exports. The example checks every emitted client chunk, including lazy routes. The browser must contain the adapter's callable functions and keep the server implementations, OIDC provider, and session cryptography out of the bundle.
 
 Run `pnpm --filter oidc-start-example dev` after verification to try the example. The home page works without credentials. For sign-in, supply the environment variables listed in the core README, set `APP_ORIGIN` to the dev server origin and register `/callback` on that origin with your provider. The example admits any authenticated user and keeps revocations in memory for local development.
 
