@@ -9,6 +9,8 @@ OpenID Connect sign-in and app-managed grants for Node.js, with a TanStack Start
 
 The host app decides which accounts may hold a session, supplies persistent revocation storage and registers its callback URLs with the provider. The React adapter uses the host's TanStack Start and Router installations.
 
+For deployment, see the [production guide](docs/production.md), [PostgreSQL example](examples/postgres/README.md) and [security reporting policy](SECURITY.md).
+
 ## Install in an existing TanStack Start app
 
 The packages require Node.js 22.12 or newer. Keep the host's React and TanStack installations. The adapter's peer ranges are `@tanstack/react-start@^1.169.2` and `@tanstack/react-router@^1.170.44`. The [working example](examples/tanstack-start) uses Start 1.169.4 and Router 1.170.46.
@@ -62,7 +64,7 @@ Stellar can keep its cookie prefix, sealing secret, access policy and revocation
 
 ## Development
 
-Development and CI use Node 26 and pnpm 12.6.0.
+Development and CI use Node 26 and pnpm 12.6.0. CI also smoke-tests the built public packages on the declared minimum, Node 22.12.0, and runs the PostgreSQL example against PostgreSQL 16. The release browser gate uses a local OIDC issuer. See the [Authentik interoperability results and reproduction steps](docs/authentik.md) for the separately tested provider configuration.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -74,6 +76,8 @@ Turbo builds core before the adapter. Verification typechecks both packages, run
 Run `pnpm --filter oidc-start-example dev` after verification to try the example. The home page works without credentials. For sign-in, supply the environment variables listed in the core README, set `APP_ORIGIN` to the dev server origin and register `/callback` on that origin with your provider. The example admits any authenticated user and keeps revocations in memory for local development.
 
 ## Releases
+
+During 0.x, breaking changes to documented APIs or storage contracts go in a minor release with migration notes. Patch releases preserve those contracts. Version 1.0 will mark the public API we intend to maintain under semantic versioning.
 
 Changesets versions the two public packages together. Add a changeset for a user-facing change. For subsequent releases, use `pnpm changeset pre enter next` to enter the prerelease cycle, `pnpm version-packages` to apply changesets, and `pnpm changeset pre exit` before versioning for stable. Review and commit the manifest, lockfile and Changesets updates together. The release tag must match both package versions.
 

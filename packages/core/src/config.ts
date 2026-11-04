@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AuthUser } from "./models.js";
+import type { SessionRefreshCoordinator } from "./refresh.js";
 import type { SessionRevocations } from "./revocation.js";
 
 export type AuthEnvironment = Readonly<Record<string, string | undefined>>;
@@ -113,6 +114,7 @@ export type OidcErrorEvent = {
 		| "callback"
 		| "refresh"
 		| "end-session"
+		| "revocation-read"
 		| "token-revocation"
 		| "backchannel-logout";
 	error: unknown;
@@ -124,6 +126,8 @@ export type OidcMiddlewareOptions = AuthServiceOptions & {
 	allowSession: (user: AuthUser) => boolean;
 	/** Server-side record of ended sessions. */
 	revocations: SessionRevocations;
+	/** Share rotating session refreshes between app instances. */
+	refreshCoordinator?: SessionRefreshCoordinator;
 	/** Read configuration inside each request. Defaults to process.env. */
 	environment?: AuthEnvironmentProvider;
 	/**

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CHUNK_SIZE } from "./cookies.js";
+import type { SessionRefreshCoordinator } from "./refresh.js";
 import type { OidcProvider } from "./provider.js";
 import { createSessionManager, type Session } from "./session.js";
 
@@ -35,6 +36,7 @@ const revocations = {
 
 function setup(
 	allowSession = (user: Session["user"]) => !user.roles || user.roles.includes("stellar"),
+	refreshCoordinator?: SessionRefreshCoordinator,
 ) {
 	const refresh = vi.fn<OidcProvider["refresh"]>();
 	const manager = createSessionManager({
@@ -43,6 +45,7 @@ function setup(
 		maxAgeSeconds: 60 * 60 * 24 * 30,
 		idleSeconds: 60 * 60 * 12,
 		revocations,
+		refreshCoordinator,
 		allowSession,
 		password: () => password,
 		provider: () => ({ refresh }) as unknown as OidcProvider,
@@ -113,6 +116,56 @@ describe("session manager", () => {
 		expect(second.session).toEqual(first.session);
 		const next = await manager.resolve(apply(jar, first.setCookies));
 		expect(next.session?.accessToken).toBe("access-2");
+	});
+
+	test.each(["rotated-token", "refresh"])("independent replicas renew once when the provider returns %s", async (refreshToken) => {
+		const pending = new Map<string, Promise<string>>();
+		const coordinator: SessionRefreshCoordinator = {
+			run({ key }, produce) {
+				if (!pending.has(key)) pending.set(key, produce());
+				return pending.get(key)!;
+			},
+		};
+		const a = setup(undefined, coordinator);
+		const b = setup(undefined, coordinator);
+		const tokens = { roles: ["stellar"], accessToken: "next", refreshToken, expiresAt: 1010 };
+		a.refresh.mockResolvedValue(tokens);
+		b.refresh.mockResolvedValue(tokens);
+		const jar = await jarWith({ ...fresh, expiresAt: 1010 });
+		const [first, second] = await Promise.all([a.manager.resolve(jar), b.manager.resolve(jar)]);
+		expect(first.session?.accessToken).toBe("next");
+		expect(second.session).toEqual(first.session);
+		expect(a.refresh.mock.calls.length + b.refresh.mock.calls.length).toBe(1);
+		const [[key, encrypted]] = pending;
+		expect(key).toMatch(/^[a-f0-9]{64}$/);
+		expect(await encrypted).toMatch(/^Fe26\.2\*/);
+		const renewed = apply(new Map(jar), second.setCookies);
+		expect((await b.manager.resolve(renewed)).session?.refreshGeneration).toBe(2);
+		expect(pending.size).toBe(2);
+		vi.setSystemTime(1_011_000);
+		expect(await a.manager.resolve(jar)).toEqual({ session: null, setCookies: [] });
+	});
+
+	test("rejects a sealed refresh result returned for another session", async () => {
+		let cached: string | undefined;
+		const { manager, refresh } = setup(undefined, {
+			run: async (_request, produce) => cached ??= await produce(),
+		});
+		refresh.mockResolvedValue({ roles: ["stellar"], accessToken: "renewed", expiresAt: 2000 });
+		const expiring = { ...fresh, expiresAt: 1010 };
+		expect((await manager.resolve(await jarWith(expiring))).session).not.toBeNull();
+		const other = await jarWith({ ...expiring, sid: "another-sign-in" });
+		expect(await manager.resolve(other)).toEqual({ session: null, setCookies: [] });
+	});
+
+	test("a coordinator outage fails closed without dispatching or erasing a peer's cookie", async () => {
+		const failure = new Error("coordination unavailable");
+		const { manager, refresh } = setup(undefined, { run: async () => { throw failure; } });
+		const report = vi.fn();
+		expect(await manager.resolve(await jarWith({ ...fresh, expiresAt: 1010 }), report))
+			.toEqual({ session: null, setCookies: [] });
+		expect(report).toHaveBeenCalledWith(failure, "refresh");
+		expect(refresh).not.toHaveBeenCalled();
 	});
 
 	test("reuses a just-completed refresh for a stale cookie, then expires it", async () => {

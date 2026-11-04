@@ -4,6 +4,8 @@ OpenID Connect sign-in for Node.js servers. Give the core a standard `Request` a
 
 Building a TanStack Start app? The React adapter connects the core to Start’s request middleware, routes, and server functions. [TanStack Start quickstart](https://www.npmjs.com/package/@lpshanley/oidc-start-react)
 
+For multi-replica deployment, see the [production guide](https://github.com/lpshanley/oidc-start/blob/main/docs/production.md) and [tested PostgreSQL example](https://github.com/lpshanley/oidc-start/tree/main/examples/postgres).
+
 ## Install and register your app
 
 Use Node.js 22.12 or newer with ES modules. Install the package from npm.

@@ -10,8 +10,20 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test-only
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 2s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/verify
+      - name: Exercise the PostgreSQL example on independent connections
+        run: pnpm --filter oidc-start-postgres-example test:postgres
+        env:
+          TEST_DATABASE_URL: postgres://postgres:test-only@127.0.0.1:5432/postgres

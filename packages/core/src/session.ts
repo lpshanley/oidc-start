@@ -8,6 +8,7 @@ import {
 } from "./cookies.js";
 import { authUserSchema } from "./models.js";
 import type { OidcProvider, RefreshedTokens } from "./provider.js";
+import { RECENT_REFRESH_MS, sharedRefresh, type SessionRefreshCoordinator } from "./refresh.js";
 import type { SessionRevocations } from "./revocation.js";
 import { sealValue, unsealValue } from "./seal.js";
 
@@ -20,17 +21,13 @@ export type { SessionRevocations };
 
 /** Refresh this many seconds before the access token expires. */
 export const REFRESH_LEEWAY_SECONDS = 30;
-/**
- * How long a completed refresh is reused for requests still carrying the old
- * refresh token, so a provider that rotates refresh tokens doesn't reject the
- * stale one from a parallel request or another tab.
- */
-export const RECENT_REFRESH_MS = 10_000;
 
 const sessionSchema = z.object({
 	user: authUserSchema,
 	accessToken: z.string().min(1),
 	refreshToken: z.string().min(1).optional(),
+	/** Sequence number of this session’s last coordinated token refresh. */
+	refreshGeneration: z.number().int().nonnegative().optional(),
 	idToken: z.string().min(1).optional(),
 	expiresAt: z.number(),
 	/** Random id naming this sign-in, so it can be revoked server-side. */
@@ -61,6 +58,7 @@ export function createSessionManager({
 	password,
 	provider,
 	revocations,
+	refreshCoordinator,
 	allowSession,
 }: {
 	cookieName: () => string;
@@ -72,6 +70,7 @@ export function createSessionManager({
 	password: () => string;
 	provider: () => OidcProvider;
 	revocations: SessionRevocations;
+	refreshCoordinator?: SessionRefreshCoordinator;
 	/** Whether the (possibly refreshed) user may keep a session. */
 	allowSession: (user: Session["user"]) => boolean;
 }) {
@@ -167,11 +166,11 @@ export function createSessionManager({
 
 	async function resolve(
 		cookies: Map<string, string>,
-		onRefreshError: (error: unknown) => void = () => {},
+		onError: (error: unknown, operation: "refresh" | "revocation-read") => void = () => {},
 		bound: <T>(work: Promise<T>) => Promise<T> = (work) => work,
 		context?: OidcCallContext,
 	): Promise<SessionResolution> {
-		const checked = await readActive(cookies, onRefreshError);
+		const checked = await readActive(cookies, (error) => onError(error, "revocation-read"));
 		const { session } = checked;
 		if (!session) return checked;
 		const now = Math.floor(Date.now() / 1000);
@@ -186,12 +185,22 @@ export function createSessionManager({
 			return { session: null, setCookies: clear(cookies) };
 		}
 		try {
-			const { roles, ...tokens } = await bound(
-				refreshOnce(session.refreshToken, session.user.sub, context),
-			);
+			const refreshToken = session.refreshToken;
+			const work = refreshCoordinator
+				? sharedRefresh(refreshCoordinator, {
+					session,
+					until: session.issuedAt + maxAgeSeconds,
+					password: password(),
+					refresh: () => provider().refresh(refreshToken, session.user.sub, context),
+				})
+				: refreshOnce(refreshToken, session.user.sub, context);
+			const refreshedTokens = await bound(work);
+			if (!refreshedTokens) return { session: null, setCookies: [] };
+			const { roles, ...tokens } = refreshedTokens;
 			const refreshed: Session = {
 				...session,
 				...tokens,
+				...(refreshCoordinator && { refreshGeneration: (session.refreshGeneration ?? 0) + 1 }),
 				idToken: tokens.idToken ?? session.idToken,
 				user: { ...session.user, roles },
 				lastSeenAt: now,
@@ -204,8 +213,10 @@ export function createSessionManager({
 				setCookies: await write(cookies, refreshed),
 			};
 		} catch (error) {
-			onRefreshError(error);
-			return { session: null, setCookies: clear(cookies) };
+			onError(error, "refresh");
+			// A peer may already have written the renewed cookie, even if this
+			// caller timed out. A failed coordinated refresh must never erase it.
+			return { session: null, setCookies: refreshCoordinator ? [] : clear(cookies) };
 		}
 	}
 

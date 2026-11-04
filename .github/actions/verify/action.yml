@@ -13,3 +13,6 @@ runs:
       shell: bash
     - run: pnpm verify
       shell: bash
+    - name: Smoke-test public imports on the minimum Node version
+      run: npm exec --yes --package=node@22.12.0 -- node examples/tanstack-start/runtime-smoke.mjs
+      shell: bash
