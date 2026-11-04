@@ -228,6 +228,18 @@ describe("provider", () => {
 		});
 	});
 
+	test("rejects a refreshed ID token for a different user", async () => {
+		oidc.refreshTokenGrant.mockResolvedValueOnce(
+			tokenResponse({ access_token: "bobs-access", id_token: "bobs-id" }, {
+				sub: "bob",
+				roles: ["admin"],
+			}),
+		);
+
+		await expect(createProvider(settings).refresh("alices-refresh", "alice"))
+			.rejects.toMatchObject({ error: "invalid_grant" });
+	});
+
 	test("builds a logout URL with id_token_hint, or none without an endpoint", async () => {
 		const provider = createProvider(settings);
 
