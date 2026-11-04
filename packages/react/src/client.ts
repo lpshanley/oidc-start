@@ -1,4 +1,4 @@
-import { createContext, createElement, Fragment, useContext, type ReactNode } from "react";
+import { createContext, createElement, Fragment, useContext, type ReactElement, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { hasRole, type AuthSession, type SignInOptions } from "@lpshanley/oidc-start-core/models";
 import { getSignInUrl, signOut } from "./functions.js";
@@ -18,12 +18,12 @@ export function useUser() {
 }
 
 /** Render children when the loader has a signed-in user. */
-export function SignedIn({ children }: { children: ReactNode }) {
+export function SignedIn({ children }: { children: ReactNode }): ReactElement | null {
 	return useUser() ? createElement(Fragment, null, children) : null;
 }
 
 /** Render children when the loader has no signed-in user. */
-export function SignedOut({ children }: { children: ReactNode }) {
+export function SignedOut({ children }: { children: ReactNode }): ReactElement | null {
 	return useUser() ? null : createElement(Fragment, null, children);
 }
 
@@ -31,12 +31,19 @@ export function useAuth() {
 	const user = useUser();
 	const signOutAndRedirect = useServerFn(signOut);
 
+	// Keep the zero-argument click handler and send only the declared RPC option.
+	function signOutUser(): Promise<never>;
+	function signOutUser(options?: { everywhere?: boolean }): Promise<never>;
+	function signOutUser(options?: { everywhere?: boolean }) {
+		return signOutAndRedirect({ data: { everywhere: options?.everywhere } });
+	}
+
 	return {
 		user,
 		hasRole: (role: string) => user !== null && hasRole(user, role),
 		async signIn(options?: SignInOptions) {
 			window.location.assign(await getSignInUrl({ data: options }));
 		},
-		signOut: (options?: { everywhere?: boolean }) => signOutAndRedirect({ data: options }),
+		signOut: signOutUser,
 	};
 }
