@@ -1,0 +1,15 @@
+name: Verify workspace
+description: Install the locked dependencies and verify the packages and example
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '26'
+        package-manager-cache: false
+    - run: npm install --global pnpm@12.6.0
+      shell: bash
+    - run: pnpm install --frozen-lockfile
+      shell: bash
+    - run: pnpm verify
+      shell: bash
