@@ -18,7 +18,8 @@ const provider = new Provider(process.env.OIDC_ISSUER, {
 	findAccount: async (_ctx, accountId) => ({
 		accountId,
 		claims: async () => ({
-			sub: accountId, email: "tester@example.test", name: "Round Trip Tester", roles: ["member"],
+			sub: accountId, email: "tester@example.test", name: "Round Trip Tester",
+			roles: accountId === "test-admin" ? ["member", "admin"] : ["member"],
 		}),
 	}),
 	issueRefreshToken: async (_ctx, client) => client.grantTypeAllowed("refresh_token"),
