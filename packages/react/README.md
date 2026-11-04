@@ -102,6 +102,8 @@ Call `signOut()` for the current session or `signOut({ everywhere: true })` for 
 
 Use `useAuth().hasRole('admin')` to show role-specific UI. It returns false for signed-out users and sessions without a roles claim. Check authorization again in the server handler that reads private data or performs the action.
 
+Import `useUser` from `@lpshanley/oidc-start-react/client` when a component only needs the loader's `AuthUser | null`.
+
 **Try it.** Open `/` in a fresh browser session and choose **Sign in**. After the provider redirects you back, your name should appear and survive a reload. Choose **Sign out**, finish logout at the provider if prompted, and reload. You should see **Sign in** again.
 
 To return someone to a specific page, pass a local path when starting sign-in, for example `getSignInUrl({ data: { returnPathname: '/account' } })`.

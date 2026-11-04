@@ -10,14 +10,20 @@ export function OidcAuthProvider({ auth, children }: { auth: AuthSession; childr
 	return createElement(AuthContext.Provider, { value: auth }, children);
 }
 
-export function useAuth() {
+/** The user supplied by the current root loader, or null when signed out. */
+export function useUser() {
 	const auth = useContext(AuthContext);
+	if (!auth) throw new Error("Auth hooks require an OidcAuthProvider.");
+	return auth.user;
+}
+
+export function useAuth() {
+	const user = useUser();
 	const signOutAndRedirect = useServerFn(signOut);
-	if (!auth) throw new Error("useAuth() requires an OidcAuthProvider.");
 
 	return {
-		user: auth.user,
-		hasRole: (role: string) => auth.user !== null && hasRole(auth.user, role),
+		user,
+		hasRole: (role: string) => user !== null && hasRole(user, role),
 		async signIn(options?: SignInOptions) {
 			window.location.assign(await getSignInUrl({ data: options }));
 		},

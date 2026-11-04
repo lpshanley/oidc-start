@@ -2,7 +2,7 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 import type { AuthUser } from "@lpshanley/oidc-start-core/models";
-import { OidcAuthProvider, useAuth } from "./client.js";
+import { OidcAuthProvider, useAuth, useUser } from "./client.js";
 
 vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
 vi.mock("./functions.js", () => ({ signOut: vi.fn(), getSignInUrl: vi.fn() }));
@@ -12,6 +12,15 @@ const member = { sub: "1", email: "member@example.com", name: null, roles: ["mem
 function render(user: AuthUser | null, children: ReactNode) {
 	return renderToStaticMarkup(createElement(OidcAuthProvider, { auth: { user }, children }));
 }
+
+test("useUser reads the SSR identity and requires a provider", () => {
+	function Identity() {
+		return useUser()?.sub ?? "guest";
+	}
+	expect(render(member, createElement(Identity))).toBe(member.sub);
+	expect(render(null, createElement(Identity))).toBe("guest");
+	expect(() => renderToStaticMarkup(createElement(Identity))).toThrow("OidcAuthProvider");
+});
 
 test("the hook checks roles against the loader's user, including older sessions", () => {
 	function Menu() {
