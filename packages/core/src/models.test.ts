@@ -27,6 +27,7 @@ test("canonical auth options retain defaults and public logout results validate 
 		sessionMaxAgeSeconds: 60 * 60 * 24 * 14,
 		sessionIdleSeconds: 60 * 60 * 12,
 		callbackPath: "/api/auth/callback",
+		grantCallbackPath: "/api/auth/grant-callback",
 		postLogoutPath: "/login",
 		providerTimeoutMs: 5_000,
 	});

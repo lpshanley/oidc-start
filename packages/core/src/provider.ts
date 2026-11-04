@@ -315,6 +315,10 @@ export function createProvider(
 			checks: Parameters<typeof api.exchangeCode>[1],
 			context?: OidcCallContext,
 		) => transport.run(context, () => api.exchangeCode(url, checks)),
+		refreshGrantTokens: (token: string, context?: OidcCallContext) =>
+			transport.run(context, async () =>
+				tokenSet((await rotate(token)).response, token),
+			),
 		refresh: (token: string, subject: string, context?: OidcCallContext) =>
 			transport.run(context, () => api.refresh(token, subject)),
 		verifyLogoutToken: (token: string, context?: OidcCallContext) =>

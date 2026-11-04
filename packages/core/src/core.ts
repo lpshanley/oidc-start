@@ -20,9 +20,11 @@ import { type AuthUser, sanitizeReturnPath } from "./models.js";
 import {
 	createProvider,
 	type OidcProvider,
+	type TokenSet,
 } from "./provider.js";
 import { createSessionManager, type Session } from "./session.js";
 import {
+	type FlowPurpose,
 	OidcStateError,
 	STATE_MAX_AGE_SECONDS,
 	sealState,
@@ -76,6 +78,20 @@ export class SessionAccessDeniedError extends Error {
 export type CallbackResult =
 	| { ok: true; location: string; setCookies: string[] }
 	| { ok: false; error: unknown; setCookies: string[] };
+
+export type GrantResult =
+	| {
+			ok: true;
+			user: AuthUser;
+			tokens: TokenSet;
+			returnPathname: string;
+			setCookies: string[];
+	  }
+	| { ok: false; error: unknown; setCookies: string[] };
+
+export type GrantRefresh =
+	| { status: "refreshed"; tokens: TokenSet }
+	| { status: "refused" };
 
 function logIdentityFailure(event: OidcErrorEvent) {
 	console.error(
@@ -149,7 +165,14 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		return serializeCookie(name, "", { ...cookieOptions(), maxAge: 0 });
 	}
 
+	function callbackUri(purpose: FlowPurpose, request: Request) {
+		return purpose === "session"
+			? redirectUri(request)
+			: `${origin(request)}${settings.grantCallbackPath}`;
+	}
+
 	async function begin(
+		purpose: FlowPurpose,
 		request: Request,
 		cookies: Map<string, string>,
 		returnPathname: string | null | undefined,
@@ -159,6 +182,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		const codeVerifier = randomPKCECodeVerifier();
 		const state = await sealState(
 			{
+				purpose,
 				nonce,
 				codeVerifier,
 				returnPathname: sanitizeReturnPath(returnPathname),
@@ -169,7 +193,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		const url = await withinDeadline(
 			provider().authorizationUrl(
 				{
-					redirectUri: redirectUri(request),
+					redirectUri: callbackUri(purpose, request),
 					state,
 					nonce,
 					codeVerifier,
@@ -195,6 +219,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 	}
 
 	async function complete(
+		purpose: FlowPurpose,
 		request: Request,
 		cookies: Map<string, string>,
 		context: OidcCallContext | undefined,
@@ -212,10 +237,11 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				state,
 				cookieValue: cookies.get(verifierCookieName(prefix(), state)),
 				password: password(),
+				purpose,
 			});
 			// Rebuild the callback on the registered redirect URI so a proxy
 			// in front of the app doesn't change the URL being verified.
-			const callbackUrl = new URL(redirectUri(request));
+			const callbackUrl = new URL(callbackUri(purpose, request));
 			callbackUrl.search = url.search;
 			const { user, tokens, idpSid } = await withinDeadline(
 				provider().exchangeCode(
@@ -266,7 +292,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			returnPathname?: string | null,
 			context?: OidcCallContext,
 		) {
-			return begin(request, cookies, returnPathname, context);
+			return begin("session", request, cookies, returnPathname, context);
 		},
 
 		/** Verifies the flow, exchanges the code, and issues the session. */
@@ -275,7 +301,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			cookies: Map<string, string>,
 			context?: OidcCallContext,
 		): Promise<CallbackResult> {
-			const result = await complete(request, cookies, context);
+			const result = await complete("session", request, cookies, context);
 			if (!result.ok) return result;
 			const { user, tokens, idpSid, flow, clearVerifier } = result;
 			try {
@@ -298,6 +324,61 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 				};
 			} catch (error) {
 				return { ok: false, error, setCookies: clearVerifier };
+			}
+		},
+
+		/**
+		 * Starts a grant: an authorization like sign-in whose tokens the app
+		 * keeps for itself, returning on `grantCallbackPath`. It writes no
+		 * session, so the browser's own session is untouched.
+		 */
+		startGrant(
+			request: Request,
+			cookies: Map<string, string>,
+			returnPathname: string,
+			context?: OidcCallContext,
+		) {
+			return begin("grant", request, cookies, returnPathname, context);
+		},
+
+		/** Verifies a grant's callback and exchanges its code for tokens. */
+		async finishGrant(
+			request: Request,
+			cookies: Map<string, string>,
+			context?: OidcCallContext,
+		): Promise<GrantResult> {
+			const result = await complete("grant", request, cookies, context);
+			if (!result.ok) return result;
+			const { flow, user, tokens, clearVerifier } = result;
+			return {
+				ok: true,
+				user,
+				tokens,
+				returnPathname: flow.returnPathname,
+				setCookies: clearVerifier,
+			};
+		},
+
+		/**
+		 * Refreshes a grant's tokens. `refused` means the provider ended the
+		 * grant (`invalid_grant`); any other failure throws, since the provider
+		 * may only be unreachable.
+		 */
+		async refreshGrant(
+			refreshToken: string,
+			context?: OidcCallContext,
+		): Promise<GrantRefresh> {
+			try {
+				const tokens = await withinDeadline(
+					provider().refreshGrantTokens(refreshToken, context),
+					context,
+				);
+				return { status: "refreshed", tokens };
+			} catch (error) {
+				if ((error as { error?: unknown } | null)?.error === "invalid_grant") {
+					return { status: "refused" };
+				}
+				throw error;
 			}
 		},
 

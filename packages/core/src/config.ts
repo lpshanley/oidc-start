@@ -28,6 +28,8 @@ export const authServiceOptionsSchema = z.object({
 		.default(60 * 60 * 12),
 	/** Callback path when OIDC_REDIRECT_URI is unset. */
 	callbackPath: z.string().default("/api/auth/callback"),
+	/** Separate return address for app-managed grants. */
+	grantCallbackPath: z.string().default("/api/auth/grant-callback"),
 	/** Application path after provider logout. Defaults to `/login`. */
 	postLogoutPath: z.string().default("/login"),
 	/** Timeout for each provider request. Defaults to 5 seconds. */

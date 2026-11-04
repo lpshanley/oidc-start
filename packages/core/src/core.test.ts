@@ -501,3 +501,120 @@ test.each([
 		auth.signOut(request("/logout"), new Map(), session, undefined, everywhere),
 	).rejects.toBe(failure);
 });
+
+describe("grants", () => {
+	async function started(path = "/oauth/upstream/start") {
+		const auth = core();
+		const jar = new Map<string, string>();
+		const start = await auth.startGrant(
+			request(path),
+			jar,
+			"/oauth/upstream/finish?pending=p1",
+		);
+		apply(jar, start.setCookies);
+		const authorize = new URL(start.url);
+		const state = authorize.searchParams.get("state") ?? "";
+		return { auth, jar, authorize, state };
+	}
+
+	test("returns the grant's tokens on its own callback and writes no session", async () => {
+		const { auth, jar, authorize, state } = await started();
+		expect(authorize.searchParams.get("redirect_uri")).toBe(
+			"https://sage.test/api/auth/grant-callback",
+		);
+
+		const result = await auth.finishGrant(
+			request(
+				`/api/auth/grant-callback?code=c&state=${encodeURIComponent(state)}`,
+				jar,
+			),
+			jar,
+		);
+
+		expect(result).toMatchObject({
+			ok: true,
+			user: { sub: "alice" },
+			tokens: { accessToken: "access", refreshToken: "refresh" },
+			returnPathname: "/oauth/upstream/finish?pending=p1",
+		});
+		expect(String(oidc.authorizationCodeGrant.mock.lastCall?.[1])).toMatch(
+			/^https:\/\/sage\.test\/api\/auth\/grant-callback\?code=c&state=/,
+		);
+		apply(jar, result.setCookies);
+		expect([...jar.keys()]).toEqual([]);
+	});
+
+	test("refuses a grant's state at the sign-in callback, and the reverse", async () => {
+		const grant = await started();
+		const session = core();
+		const sessionJar = new Map<string, string>();
+		const signIn = await session.signIn(request("/"), sessionJar);
+		apply(sessionJar, signIn.setCookies);
+		const sessionState = new URL(signIn.url).searchParams.get("state") ?? "";
+
+		const asSession = await grant.auth.callback(
+			request(
+				`/api/auth/callback?code=c&state=${encodeURIComponent(grant.state)}`,
+				grant.jar,
+			),
+			grant.jar,
+		);
+		const asGrant = await session.finishGrant(
+			request(
+				`/api/auth/grant-callback?code=c&state=${encodeURIComponent(sessionState)}`,
+				sessionJar,
+			),
+			sessionJar,
+		);
+
+		expect(asSession).toMatchObject({
+			ok: false,
+			error: { reason: "mismatch" },
+		});
+		expect(asGrant).toMatchObject({ ok: false, error: { reason: "mismatch" } });
+	});
+
+	test("refreshes a grant, and tells a refusal from an outage", async () => {
+		const auth = core();
+		oidc.refreshTokenGrant.mockResolvedValueOnce({
+			access_token: "access-2",
+			refresh_token: "refresh-2",
+			expiresIn: () => 300,
+		});
+		await expect(auth.refreshGrant("refresh-1")).resolves.toMatchObject({
+			status: "refreshed",
+			tokens: { accessToken: "access-2", refreshToken: "refresh-2" },
+		});
+
+		async function dispatchedFailure(error: Error) {
+			const options = oidc.discovery.mock.lastCall?.[4] as Record<
+				symbol,
+				typeof fetch
+			>;
+			await options[oidc.customFetch]("https://idp.test/token");
+			throw error;
+		}
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response()),
+		);
+		try {
+			const invalid = Object.assign(new Error("refused"), {
+				error: "invalid_grant",
+			});
+			oidc.refreshTokenGrant.mockImplementationOnce(() =>
+				dispatchedFailure(invalid),
+			);
+			await expect(auth.refreshGrant("refresh-2")).resolves.toEqual({
+				status: "refused",
+			});
+			const offline = new TypeError("network unavailable");
+			oidc.refreshTokenGrant.mockImplementationOnce(() =>
+				dispatchedFailure(offline),
+			);
+			await expect(auth.refreshGrant("refresh-2")).rejects.toBe(offline);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});

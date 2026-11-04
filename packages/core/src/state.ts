@@ -11,7 +11,14 @@ export const STATE_MAX_AGE_SECONDS = 600;
 export const MAX_PENDING_VERIFIERS = 5;
 const CLOCK_SKEW_MS = 60_000;
 
+/**
+ * What a flow's callback completes: the browser's session, or a grant the
+ * app keeps on its own. A callback refuses the other purpose's state.
+ */
+export type FlowPurpose = "session" | "grant";
+
 const flowStateSchema = z.object({
+	purpose: z.enum(["session", "grant"]).default("session"),
 	nonce: z.string().min(1),
 	codeVerifier: z.string().min(1),
 	returnPathname: z.string(),
@@ -72,10 +79,12 @@ export async function verifyCallbackState({
 	state,
 	cookieValue,
 	password,
+	purpose = "session",
 }: {
 	state: string;
 	cookieValue: string | undefined;
 	password: string;
+	purpose?: FlowPurpose;
 }): Promise<FlowState> {
 	if (cookieValue === undefined) throw new OidcStateError("missing");
 	if (!constantTimeEqual(state, cookieValue)) {
@@ -93,6 +102,7 @@ export async function verifyCallbackState({
 	if (age < -CLOCK_SKEW_MS || age > STATE_MAX_AGE_SECONDS * 1000) {
 		throw new OidcStateError("invalid");
 	}
+	if (parsed.purpose !== purpose) throw new OidcStateError("mismatch");
 	return parsed;
 }
 
