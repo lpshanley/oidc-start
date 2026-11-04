@@ -209,6 +209,22 @@ describe("provider", () => {
 		expect(user.email).toBe("a@x.test");
 	});
 
+	test("keeps the old refresh token when the provider does not rotate it", async () => {
+		oidc.refreshTokenGrant.mockResolvedValueOnce(
+			tokenResponse({ access_token: "a2" }, undefined, 60),
+		);
+
+		await expect(
+			createProvider(settings).refresh("r1", "alice"),
+		).resolves.toEqual({
+			accessToken: "a2",
+			refreshToken: "r1",
+			idToken: undefined,
+			roles: [],
+			expiresAt: 1_060,
+		});
+	});
+
 	test.each([
 		["an absolute URL", "https://cdn.test/a.png", "https://cdn.test/a.png"],
 		[
@@ -233,4 +249,21 @@ describe("provider", () => {
 
 		expect(user.picture).toBe(expected);
 	});
+});
+
+test("re-reads roles on refresh, from the ID token or else userinfo", async () => {
+	oidc.refreshTokenGrant.mockResolvedValueOnce(
+		tokenResponse({ access_token: "a2" }, { sub: "alice", roles: ["stellar"] }),
+	);
+	await expect(
+		createProvider(settings).refresh("r1", "alice"),
+	).resolves.toMatchObject({ roles: ["stellar"] });
+
+	oidc.refreshTokenGrant.mockResolvedValueOnce(
+		tokenResponse({ access_token: "a3" }, undefined),
+	);
+	oidc.fetchUserInfo.mockResolvedValueOnce({ sub: "alice", roles: [] });
+	await expect(
+		createProvider(settings).refresh("r2", "alice"),
+	).resolves.toMatchObject({ roles: [] });
 });

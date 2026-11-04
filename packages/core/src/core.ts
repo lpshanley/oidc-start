@@ -202,6 +202,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 		maxAgeSeconds: settings.sessionMaxAgeSeconds,
 		idleSeconds: settings.sessionIdleSeconds,
 		password,
+		provider,
 		revocations: options.revocations,
 		allowSession: options.allowSession,
 	});

@@ -15,6 +15,9 @@ export type TokenSet = {
 	refreshExpiresAt?: number;
 };
 
+/** Tokens from a refresh, with roles re-read so membership changes apply. */
+export type RefreshedTokens = TokenSet & { roles: string[] };
+
 /** Used when a token response omits expires_in, so refresh is still attempted. */
 const DEFAULT_TOKEN_LIFETIME_SECONDS = 300;
 
@@ -103,6 +106,12 @@ export function createProvider(
 		return configuration;
 	}
 
+	async function rotate(refreshToken: string) {
+		const config = await discover();
+		const response = await client.refreshTokenGrant(config, refreshToken);
+		return { config, response };
+	}
+
 	return {
 		async authorizationUrl({
 			redirectUri,
@@ -174,6 +183,25 @@ export function createProvider(
 				// The provider's session id, matched by back-channel logout tokens.
 				idpSid: firstString(claims.sid) ?? undefined,
 			};
+		},
+
+		async refresh(refreshToken: string, sub: string): Promise<RefreshedTokens> {
+			const { config, response } = await rotate(refreshToken);
+			const claims = response.claims();
+			if (claims && claims.sub !== sub)
+				throw Object.assign(new Error("Refresh subject mismatch"), {
+					error: "invalid_grant",
+				});
+			let roles = roleList(claims?.[settings.OIDC_ROLES_CLAIM]);
+			if (roles === undefined) {
+				const info = await client.fetchUserInfo(
+					config,
+					response.access_token,
+					sub,
+				);
+				roles = roleList(info[settings.OIDC_ROLES_CLAIM]) ?? [];
+			}
+			return { ...tokenSet(response, refreshToken), roles };
 		},
 
 	};

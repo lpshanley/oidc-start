@@ -6,10 +6,25 @@ import {
 	writeChunked,
 } from "./cookies.js";
 import { authUserSchema } from "./models.js";
+import type { OidcProvider, RefreshedTokens } from "./provider.js";
 import type { SessionRevocations } from "./revocation.js";
 import { sealValue, unsealValue } from "./seal.js";
 
 export type { SessionRevocations };
+
+// Session resolution after WorkOS authkit-session's AuthKitCore and
+// AuthService: the sealed cookie holds the user and tokens, and an expiring
+// access token is refreshed with in-flight deduplication. Unlike WorkOS, it
+// refreshes shortly before expiry and clears the cookie when refresh fails.
+
+/** Refresh this many seconds before the access token expires. */
+export const REFRESH_LEEWAY_SECONDS = 30;
+/**
+ * How long a completed refresh is reused for requests still carrying the old
+ * refresh token, so a provider that rotates refresh tokens doesn't reject the
+ * stale one from a parallel request or another tab.
+ */
+export const RECENT_REFRESH_MS = 10_000;
 
 const sessionSchema = z.object({
 	user: authUserSchema,
@@ -43,6 +58,7 @@ export function createSessionManager({
 	maxAgeSeconds,
 	idleSeconds,
 	password,
+	provider,
 	revocations,
 	allowSession,
 }: {
@@ -53,10 +69,46 @@ export function createSessionManager({
 	/** Lifetime without requests. */
 	idleSeconds: number;
 	password: () => string;
+	provider: () => OidcProvider;
 	revocations: SessionRevocations;
 	/** Whether the (possibly refreshed) user may keep a session. */
 	allowSession: (user: Session["user"]) => boolean;
 }) {
+	const refreshes = new Map<
+		string,
+		{ result: Promise<RefreshedTokens>; settledAt?: number }
+	>();
+
+	function refreshOnce(
+		refreshToken: string,
+		sub: string,
+	) {
+		const now = Date.now();
+		for (const [token, entry] of refreshes) {
+			if (entry.settledAt && now - entry.settledAt > RECENT_REFRESH_MS) {
+				refreshes.delete(token);
+			}
+		}
+		const existing = refreshes.get(refreshToken);
+		if (existing) return existing.result;
+		const entry: { result: Promise<RefreshedTokens>; settledAt?: number } = {
+			result: provider()
+				.refresh(refreshToken, sub)
+				.then(
+					(tokens) => {
+						entry.settledAt = Date.now();
+						return tokens;
+					},
+					(error: unknown) => {
+						refreshes.delete(refreshToken);
+						throw error;
+					},
+				),
+		};
+		refreshes.set(refreshToken, entry);
+		return entry.result;
+	}
+
 	async function write(cookies: Map<string, string>, session: Session) {
 		const sealed = await sealValue(session, password(), maxAgeSeconds);
 		return writeChunked(cookies, name(), sealed, {
@@ -100,14 +152,36 @@ export function createSessionManager({
 			onRefreshError(error);
 			return { session: null, setCookies: [] };
 		}
-		if (session.expiresAt > now) {
+		if (session.expiresAt - now > REFRESH_LEEWAY_SECONDS) {
 			if (now - session.lastSeenAt < TOUCH_AFTER_SECONDS) {
 				return { session, setCookies: [] };
 			}
 			const touched = { ...session, lastSeenAt: now };
 			return { session: touched, setCookies: await write(cookies, touched) };
 		}
-		return { session: null, setCookies: clear(cookies) };
+		if (!session.refreshToken) {
+			return { session: null, setCookies: clear(cookies) };
+		}
+		try {
+			const { roles, ...tokens } = await refreshOnce(session.refreshToken, session.user.sub);
+			const refreshed: Session = {
+				...session,
+				...tokens,
+				idToken: tokens.idToken ?? session.idToken,
+				user: { ...session.user, roles },
+				lastSeenAt: now,
+			};
+			if (!allowSession(refreshed.user)) {
+				return { session: null, setCookies: clear(cookies) };
+			}
+			return {
+				session: refreshed,
+				setCookies: await write(cookies, refreshed),
+			};
+		} catch (error) {
+			onRefreshError(error);
+			return { session: null, setCookies: clear(cookies) };
+		}
 	}
 
 	return { resolve, write, clear };
