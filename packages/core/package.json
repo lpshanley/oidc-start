@@ -4,7 +4,12 @@
   "description": "OpenID Connect sign-in, grants and sessions for Node.js",
   "type": "module",
   "sideEffects": false,
+  "types": "./dist/index.d.ts",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./models": {
       "types": "./dist/models.d.ts",
       "import": "./dist/models.js"

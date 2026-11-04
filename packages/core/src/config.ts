@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { AuthUser } from "./models.js";
+import type { SessionRevocations } from "./revocation.js";
 
 export type AuthEnvironment = Readonly<Record<string, string | undefined>>;
 export type AuthEnvironmentProvider = () => AuthEnvironment;
@@ -91,3 +93,39 @@ export function assertOidcConfigured(env: AuthEnvironment) {
 		);
 	}
 }
+
+/**
+ * The caller's request context, read from `context.requestContext` when an
+ * earlier request middleware provides one.
+ */
+export type OidcCallContext = {
+	correlationId?: string;
+};
+
+/** A failure the library recovered from or reported to the browser. */
+export type OidcErrorEvent = {
+	operation:
+		| "sign-in"
+		| "callback"
+		| "refresh"
+		| "end-session"
+		| "token-revocation"
+		| "backchannel-logout";
+	error: unknown;
+	context?: OidcCallContext;
+};
+
+export type OidcMiddlewareOptions = AuthServiceOptions & {
+	/** The host decides who may start or keep a session. */
+	allowSession: (user: AuthUser) => boolean;
+	/** Server-side record of ended sessions. */
+	revocations: SessionRevocations;
+	/** Read configuration inside each request. Defaults to process.env. */
+	environment?: AuthEnvironmentProvider;
+	/**
+	 * Receives provider and flow failures. The error may carry provider
+	 * responses, so redact it before logging. Defaults to logging the
+	 * operation and request ID only.
+	 */
+	onError?: (event: OidcErrorEvent) => void;
+};
