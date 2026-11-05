@@ -115,6 +115,7 @@ export function serviceProviderConfig(documentationUri?: string) {
 type Attribute = {
 	name: string;
 	type: "string" | "boolean" | "complex" | "reference";
+	description?: string;
 	multiValued?: boolean;
 	required?: boolean;
 	mutability?: "readWrite" | "readOnly";
@@ -122,7 +123,12 @@ type Attribute = {
 	referenceTypes?: string[];
 	subAttributes?: Attribute[];
 };
+const words = (name: string) => {
+	const spaced = name.replace(/^\$/, "").replace(/([A-Z])/g, " $1").toLowerCase();
+	return spaced[0].toUpperCase() + spaced.slice(1);
+};
 const attribute = (a: Attribute): Attribute & { caseExact: boolean; returned: string } => ({
+	description: words(a.name),
 	multiValued: false,
 	required: false,
 	mutability: "readWrite",
@@ -132,8 +138,16 @@ const attribute = (a: Attribute): Attribute & { caseExact: boolean; returned: st
 	...a,
 	...(a.subAttributes ? { subAttributes: a.subAttributes.map(attribute) } : {}),
 });
+const text = (name: string): Attribute => ({ name, type: "string" });
+const entry = ["value", "display", "type"].map(text).concat({ name: "primary", type: "boolean" });
+const list = (name: string, ...extra: Attribute[]): Attribute => ({
+	name,
+	type: "complex",
+	multiValued: true,
+	subAttributes: [...entry, ...extra],
+});
 
-/** The attributes this package supports (RFC 7643 §7), not the whole core schema. */
+/** The attributes this package keeps (RFC 7643 §7), which is the core schema without password and groups. */
 const SCHEMAS = [
 	{
 		id: USER,
@@ -141,17 +155,31 @@ const SCHEMAS = [
 		description: "A person provisioned by the identity provider",
 		attributes: [
 			{ name: "userName", type: "string", required: true, uniqueness: "server" },
-			{ name: "displayName", type: "string" },
+			text("displayName"),
 			{
 				name: "name",
 				type: "complex",
-				subAttributes: [
-					{ name: "formatted", type: "string" },
-					{ name: "givenName", type: "string" },
-					{ name: "familyName", type: "string" },
-				],
+				subAttributes: ["formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix"].map(text),
 			},
+			...["nickName", "profileUrl", "title", "userType", "preferredLanguage", "locale", "timezone"].map(text),
 			{ name: "active", type: "boolean" },
+			list("emails"),
+			list("phoneNumbers"),
+			list("ims"),
+			list("photos"),
+			list("addresses", ...["formatted", "streetAddress", "locality", "region", "postalCode", "country"].map(text)),
+			list("entitlements"),
+			list("roles"),
+			list("x509Certificates"),
+		] satisfies Attribute[],
+	},
+	{
+		id: ENTERPRISE,
+		name: "EnterpriseUser",
+		description: "Enterprise attributes of a user",
+		attributes: [
+			...["employeeNumber", "costCenter", "organization", "division", "department"].map(text),
+			{ name: "manager", type: "complex", subAttributes: ["value", "displayName"].map(text) },
 		] satisfies Attribute[],
 	},
 	{
@@ -165,7 +193,7 @@ const SCHEMAS = [
 				type: "complex",
 				multiValued: true,
 				subAttributes: [
-					{ name: "value", type: "string" },
+					text("value"),
 					{ name: "$ref", type: "reference", referenceTypes: ["User"] },
 					{ name: "display", type: "string", mutability: "readOnly" },
 				],
@@ -185,8 +213,15 @@ export function schemas(base: string) {
 
 export function resourceTypes(base: string) {
 	return [
-		{ id: "User", name: "User", endpoint: "/Users", schema: USER },
-		{ id: "Group", name: "Group", endpoint: "/Groups", schema: GROUP },
+		{
+			id: "User",
+			name: "User",
+			description: "A provisioned person",
+			endpoint: "/Users",
+			schema: USER,
+			schemaExtensions: [{ schema: ENTERPRISE, required: false }],
+		},
+		{ id: "Group", name: "Group", description: "A group of people", endpoint: "/Groups", schema: GROUP },
 	].map((r) => ({
 		schemas: ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
 		...r,

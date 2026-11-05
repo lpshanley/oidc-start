@@ -301,6 +301,19 @@ test("the lookups Entra can match on find the right user", async () => {
 	expect(await found('userName eq "alice@x.test" and externalId eq "other"')).toEqual([]);
 });
 
+test("discovery describes every attribute the package keeps", async () => {
+	const { scim } = setup();
+	const ent = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
+	const { body } = await get(scim, "/Schemas");
+	expect(body.Resources.map((s: { id: string }) => s.id)).toEqual([USER, ent, GROUP]);
+	const user = body.Resources[0].attributes;
+	expect(user.map((a: { name: string }) => a.name)).toEqual(expect.arrayContaining(["emails", "title", "addresses"]));
+	expect(user.map((a: { name: string }) => a.name)).not.toContain("password");
+	for (const schema of body.Resources)
+		for (const attribute of schema.attributes) expect(attribute.description, attribute.name).toEqual(expect.any(String));
+	expect((await get(scim, "/ResourceTypes/User")).body.schemaExtensions).toEqual([{ schema: ent, required: false }]);
+});
+
 test("group PUT keeps an externalId it omits, and replaces members", async () => {
 	const { adapter, scim } = setup();
 	const groups = scim.forConnection("acme").groups;
@@ -347,7 +360,7 @@ test("discovery lists resources and serves each one as a plain object", async ()
 	const types = await get(scim, "/ResourceTypes");
 	expect(types.body.totalResults).toBe(2);
 	const schemas = await get(scim, "/Schemas");
-	expect(schemas.body.Resources.map((s: { id: string }) => s.id)).toEqual([USER, GROUP]);
+	expect(schemas.body.Resources).toHaveLength(3);
 	for (const location of [...types.body.Resources, ...schemas.body.Resources].map((r) => r.meta.location as string)) {
 		const one = await get(scim, location.split("/scim/v2")[1]);
 		expect(one.status).toBe(200);
