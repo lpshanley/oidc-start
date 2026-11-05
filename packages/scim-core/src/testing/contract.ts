@@ -153,6 +153,10 @@ export function testScimAdapter<TConnection, TUser extends ScimUser, TTransactio
 		assert.equal(await store.renameGroup("missing", "None"), false);
 		assert.equal((await store.groups({ displayName: "Platform" }, 0, 10)).total, 1);
 		assert.equal((await store.groups({ id: group }, 0, 10)).total, 1);
+		assert.equal((await store.groups({ displayName: "PLATFORM" }, 0, 10)).total, 1);
+		assert.equal(await store.renameGroup(group, "PLATFORM"), true);
+		await store.renameGroup(group, "Platform");
+		await rejectsWith(store.createGroup({ displayName: "platform", externalId: null, memberIds: [] }), conflict);
 		await rejectsWith(store.createGroup({ displayName: "Platform", externalId: null, memberIds: [] }), conflict);
 		assert.equal(await store.deleteGroup(group), true);
 		assert.equal(await store.deleteGroup(group), false);

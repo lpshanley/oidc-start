@@ -67,3 +67,25 @@ test("the contract catches an adapter that compares userName exactly", async () 
 		})),
 	).toContain("finds users by userName ignoring case, and by externalId");
 });
+
+test("the contract catches an adapter that compares group names exactly", async () => {
+	expect(
+		await failures((adapter) => ({
+			...adapter,
+			transaction: (connection, fn) =>
+				adapter.transaction(connection, (store, tx) =>
+					fn(
+						{
+							...store,
+							groups: async (filter, offset, limit) => {
+								const page = await store.groups(filter, offset, limit);
+								const items = page.items.filter((g) => !filter.displayName || g.displayName === filter.displayName);
+								return { total: items.length, items };
+							},
+						},
+						tx,
+					),
+				),
+		})),
+	).toContain("renames groups, finds them, and refuses a duplicate name");
+});

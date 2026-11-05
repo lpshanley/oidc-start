@@ -22,6 +22,7 @@ export interface ScimStore<TUser extends ScimUser = ScimUser> {
 	/** Also removes the user from every group. */
 	deleteUser(id: string): Promise<TUser | undefined>;
 	group(id: string): Promise<ScimGroup | undefined>;
+	/** `displayName` matches case-insensitively, as it does for uniqueness. */
 	groups(filter: ScimGroupFilter, offset: number, limit: number): Promise<ScimPage<ScimGroup>>;
 	createGroup(fields: ScimGroupFields): Promise<string>;
 	/** An undefined externalId keeps the current value. */

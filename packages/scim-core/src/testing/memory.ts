@@ -29,7 +29,7 @@ function storeOf(state: State, now: () => number): ScimStore {
 	};
 	const uniqueGroup = (displayName: string, self?: string) => {
 		for (const g of state.groups.values())
-			if (g.id !== self && g.displayName === displayName) throw new ScimConflictError();
+			if (g.id !== self && lower(g.displayName) === lower(displayName)) throw new ScimConflictError();
 	};
 	const known = (ids: string[]) => {
 		for (const id of ids)
@@ -88,7 +88,7 @@ function storeOf(state: State, now: () => number): ScimStore {
 			const items = [...state.groups.values()].filter(
 				(g) =>
 					(f.id === undefined || g.id === f.id) &&
-					(f.displayName === undefined || g.displayName === f.displayName) &&
+					(f.displayName === undefined || lower(g.displayName) === lower(f.displayName)) &&
 					(f.externalId === undefined || g.externalId === f.externalId),
 			);
 			return copy(page(items.map(group), offset, limit));
