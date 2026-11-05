@@ -124,3 +124,10 @@ test("an operation that is not an object is refused", () => {
 	expect(() => patch(null)).toThrow("Each operation must be an object");
 	expect(() => patchGroup({ Operations: [1] })).toThrow("Each operation must be an object");
 });
+
+test("add and replace need a value, so a missing one cannot clear an attribute", () => {
+	expect(() => patch({ op: "add", path: "displayName" })).toThrow("add needs a value");
+	expect(() => patch({ op: "Replace", path: "name.givenName" })).toThrow("replace needs a value");
+	expect(() => patchGroup({ Operations: [{ op: "replace", path: "members" }] })).toThrow("replace needs a value");
+	expect(patch({ op: "replace", path: "displayName", value: null }).displayName).toBeNull();
+});

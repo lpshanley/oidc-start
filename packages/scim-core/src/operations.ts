@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { ScimAdapter, ScimStore } from "./adapter.js";
 import { notFound, ScimError } from "./errors.js";
 import { patchUser, parseUser, replaceUser } from "./protocol.js";
@@ -49,6 +50,23 @@ const fieldsOf = ({ userName, externalId, displayName, name, active }: ScimUserF
 });
 const summary = (g: { id: string; displayName: string }): GroupSummary => ({ id: g.id, displayName: g.displayName });
 
+/** Whether a group PATCH would leave the group as it is. */
+function unchanged(group: ScimGroup, patch: ScimGroupChange[]) {
+	const before = group.members.map((m) => m.id);
+	const members = new Set(before);
+	let { displayName } = group;
+	for (const change of patch) {
+		if (change.kind === "rename") displayName = change.displayName;
+		else if (change.kind === "add") for (const id of change.ids) members.add(id);
+		else if (change.kind === "remove") for (const id of change.ids) members.delete(id);
+		else {
+			members.clear();
+			for (const id of change.ids) members.add(id);
+		}
+	}
+	return displayName === group.displayName && members.size === before.length && before.every((id) => members.has(id));
+}
+
 /**
  * Every change runs in one transaction with its hooks. HTTP requests and direct
  * calls share this path, so both end access the same way.
@@ -91,7 +109,10 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 			// Ending access matters more than a clean request, so a deactivation
 			// still goes through and the stored externalId stays as it was.
 			if (conflict && !deactivating) throw new ScimError(400, "mutability", "externalId cannot change");
-			const user = await store.replaceUser(id, conflict ? { ...fields, externalId: current.externalId } : fields);
+			const stored = conflict ? { ...fields, externalId: current.externalId } : fields;
+			// An unchanged resource keeps its lastModified (RFC 7644 §3.5.2.1).
+			if (isDeepStrictEqual(stored, fieldsOf(current))) return current;
+			const user = await store.replaceUser(id, stored);
 			if (!user) throw notFound();
 			if (deactivating) {
 				const details = await deprovision(user, tx, "deactivated");
@@ -166,6 +187,7 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 				await commit(async (store, _tx, record) => {
 					const current = await store.group(id);
 					if (!current) throw notFound();
+					if (unchanged(current, patch)) return;
 					let displayName = current.displayName;
 					const counts = { added: 0, removed: 0, replaced: false };
 					for (const change of patch) {

@@ -100,7 +100,15 @@ const patchRequest = z.object(
 	},
 	{ error: "Expected a JSON object" },
 );
-const operations = (body: unknown): Op[] => read(patchRequest, body).Operations;
+function operations(body: unknown): Op[] {
+	const ops = read(patchRequest, body).Operations;
+	for (const o of ops) {
+		const op = String(o.op ?? "").toLowerCase();
+		// Without this, a missing value would clear the attribute it names.
+		if ((op === "add" || op === "replace") && o.value === undefined) throw invalid(`${op} needs a value`);
+	}
+	return ops;
+}
 const opName = (o: Op) => String(o.op ?? "").toLowerCase();
 /** A path may carry the schema it belongs to (RFC 7644 §3.10). */
 const attributePath = (path: unknown) => {

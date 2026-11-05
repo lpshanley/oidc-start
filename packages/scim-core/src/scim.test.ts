@@ -207,6 +207,29 @@ test("group PATCH applies operations in order, in one transaction", async () => 
 	expect(await members()).toEqual([u2.id]);
 });
 
+test("a PATCH that changes nothing leaves the resource and its history alone", async () => {
+	const changes: string[] = [];
+	const { scim } = setup({ onChange: async (change) => void changes.push(change.type) });
+	const idp = createTestProvider(scim, { dialect: "okta" });
+	const alice = await idp.createUser({ userName: "alice@x.test" });
+	const group = await idp.createGroup("ops", [alice]);
+	const patch = (path: string, ...Operations: unknown[]) =>
+		idp.send("PATCH", path, { schemas: [PATCH], Operations });
+	changes.length = 0;
+
+	const user = await patch(`/Users/${alice.id}`, { op: "replace", path: "userName", value: "alice@x.test" });
+	expect(user.body.meta.version).toBe((await idp.getUser(alice.id)).body.meta.version);
+	const before = await idp.getGroup(group.id);
+	const same = await patch(
+		`/Groups/${group.id}`,
+		{ op: "add", path: "members", value: [{ value: alice.id }] },
+		{ op: "replace", path: "displayName", value: "ops" },
+	);
+	expect(same.status).toBe(200);
+	expect(same.body.meta).toEqual(before.meta);
+	expect(changes).toEqual([]);
+});
+
 test("group PUT keeps an externalId it omits, and replaces members", async () => {
 	const { adapter, scim } = setup();
 	const groups = scim.forConnection("acme").groups;
