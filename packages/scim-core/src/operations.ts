@@ -1,0 +1,198 @@
+import type { ScimAdapter, ScimStore } from "./adapter.js";
+import { notFound, ScimError } from "./errors.js";
+import { patchUser, parseUser, replaceUser } from "./protocol.js";
+import type { ScimGroup, ScimGroupChange, ScimGroupFields, ScimUser, ScimUserFields } from "./types.js";
+
+type Details = Record<string, unknown>;
+type GroupSummary = { id: string; displayName: string };
+
+/** What a committed request changed. */
+export type ScimChange<TUser extends ScimUser = ScimUser> =
+	| { type: "user.created"; user: TUser }
+	| { type: "user.updated"; user: TUser }
+	/** `externalIdConflict`: the request sent a different externalId, which was not stored. */
+	| { type: "user.deactivated"; user: TUser; details?: Details; externalIdConflict?: true }
+	| { type: "user.deleted"; user: TUser; details?: Details }
+	| { type: "group.created"; group: GroupSummary; members: number }
+	| { type: "group.replaced"; group: GroupSummary; members: number }
+	| { type: "group.patched"; group: GroupSummary; added: number; removed: number; replaced: boolean }
+	| { type: "group.deleted"; group: GroupSummary };
+
+export type ScimHooks<TConnection, TUser extends ScimUser, TTransaction> = {
+	/**
+	 * Runs inside the transaction when a user is deactivated or deleted, so a
+	 * failure rolls the change back. End access and delete the user's data
+	 * here. What it returns reaches `onChange` and `onCommitted` as `details`.
+	 */
+	onUserDeprovisioned?(
+		user: TUser,
+		context: { connection: TConnection; tx: TTransaction; reason: "deactivated" | "deleted" },
+	): Promise<Details | void>;
+	/** Runs inside the transaction for every change, for example to write an audit row. */
+	onChange?(change: ScimChange<TUser>, context: { connection: TConnection; tx: TTransaction }): Promise<void>;
+	/** Runs after commit, for example to clear a cache. A failure here cannot undo the change. */
+	onCommitted?(change: ScimChange<TUser>, context: { connection: TConnection }): Promise<void> | void;
+};
+
+type Options<TConnection, TUser extends ScimUser, TTransaction> = ScimHooks<TConnection, TUser, TTransaction> & {
+	adapter: ScimAdapter<TConnection, TUser, TTransaction>;
+	/** Reports a hook that failed after commit. */
+	afterCommitFailed(error: unknown): void;
+};
+
+const fieldsOf = ({ userName, externalId, displayName, name, active }: ScimUserFields): ScimUserFields => ({
+	userName,
+	externalId,
+	displayName,
+	name,
+	active,
+});
+const summary = (g: { id: string; displayName: string }): GroupSummary => ({ id: g.id, displayName: g.displayName });
+
+/**
+ * Every change runs in one transaction with its hooks. HTTP requests and direct
+ * calls share this path, so both end access the same way.
+ */
+export function createOperations<TConnection, TUser extends ScimUser, TTransaction>(
+	options: Options<TConnection, TUser, TTransaction>,
+	connection: TConnection,
+) {
+	const { adapter, onUserDeprovisioned, onChange, onCommitted } = options;
+	type Record = (change: ScimChange<TUser>) => Promise<void>;
+
+	async function commit<T>(fn: (store: ScimStore<TUser>, tx: TTransaction, record: Record) => Promise<T>) {
+		const changes: ScimChange<TUser>[] = [];
+		const result = await adapter.transaction(connection, (store, tx) =>
+			fn(store, tx, async (change) => {
+				await onChange?.(change, { connection, tx });
+				changes.push(change);
+			}),
+		);
+		for (const change of changes) {
+			try {
+				await onCommitted?.(change, { connection });
+			} catch (error) {
+				options.afterCommitFailed(error);
+			}
+		}
+		return result;
+	}
+
+	const deprovision = async (user: TUser, tx: TTransaction, reason: "deactivated" | "deleted") =>
+		(await onUserDeprovisioned?.(user, { connection, tx, reason })) ?? undefined;
+
+	const write = (id: string, next: (current: ScimUserFields) => ScimUserFields) =>
+		commit(async (store, tx, record) => {
+			const current = await store.user(id);
+			if (!current) throw notFound();
+			const fields = next(fieldsOf(current));
+			const conflict = current.externalId !== null && fields.externalId !== current.externalId;
+			const deactivating = current.active && !fields.active;
+			// Ending access matters more than a clean request, so a deactivation
+			// still goes through and the stored externalId stays as it was.
+			if (conflict && !deactivating) throw new ScimError(400, "mutability", "externalId cannot change");
+			const user = await store.replaceUser(id, conflict ? { ...fields, externalId: current.externalId } : fields);
+			if (!user) throw notFound();
+			if (deactivating) {
+				const details = await deprovision(user, tx, "deactivated");
+				await record({
+					type: "user.deactivated",
+					user,
+					...(details ? { details } : {}),
+					...(conflict ? { externalIdConflict: true as const } : {}),
+				});
+			} else await record({ type: "user.updated", user });
+			return user;
+		});
+
+	const group = async (id: string) => (await adapter.read(connection).group(id)) ?? Promise.reject(notFound());
+
+	return {
+		users: {
+			get: async (id: string) => (await adapter.read(connection).user(id)) ?? Promise.reject(notFound()),
+			list: (filter: { userName?: string; externalId?: string }, offset: number, limit: number) =>
+				adapter.read(connection).users(filter, offset, limit),
+			create: (body: unknown) => {
+				const fields = parseUser(body);
+				return commit(async (store, _tx, record) => {
+					const user = await store.createUser(fields);
+					await record({ type: "user.created", user });
+					return user;
+				});
+			},
+			replace: (id: string, body: unknown) => write(id, (current) => replaceUser(current, body)),
+			patch: (id: string, body: unknown) => write(id, (current) => patchUser(current, body)),
+			/** An offboarding the application started. It takes the same path as a provider's request. */
+			deactivate: (id: string) => write(id, (current) => ({ ...current, active: false })),
+			delete: (id: string) =>
+				commit(async (store, tx, record) => {
+					const user = await store.deleteUser(id);
+					if (!user) throw notFound();
+					const details = await deprovision(user, tx, "deleted");
+					await record({ type: "user.deleted", user, ...(details ? { details } : {}) });
+				}),
+		},
+		groups: {
+			get: group,
+			list: (filter: { displayName?: string; externalId?: string }, offset: number, limit: number) =>
+				adapter.read(connection).groups(filter, offset, limit),
+			create: async (fields: ScimGroupFields): Promise<ScimGroup> => {
+				const id = await commit(async (store, _tx, record) => {
+					const id = await store.createGroup(fields);
+					await record({
+						type: "group.created",
+						group: { id, displayName: fields.displayName },
+						members: fields.memberIds.length,
+					});
+					return id;
+				});
+				return group(id);
+			},
+			replace: async (id: string, fields: ScimGroupFields): Promise<ScimGroup> => {
+				await commit(async (store, _tx, record) => {
+					const current = await store.group(id);
+					if (!current) throw notFound();
+					await store.renameGroup(id, fields.displayName, fields.externalId ?? current.externalId);
+					await store.setMembers(id, fields.memberIds);
+					await record({
+						type: "group.replaced",
+						group: { id, displayName: fields.displayName },
+						members: fields.memberIds.length,
+					});
+				});
+				return group(id);
+			},
+			patch: async (id: string, patch: ScimGroupChange[]): Promise<ScimGroup> => {
+				await commit(async (store, _tx, record) => {
+					const current = await store.group(id);
+					if (!current) throw notFound();
+					let displayName = current.displayName;
+					const counts = { added: 0, removed: 0, replaced: false };
+					for (const change of patch) {
+						if (change.kind === "rename") {
+							displayName = change.displayName;
+							await store.renameGroup(id, displayName);
+						} else if (change.kind === "add") {
+							counts.added += change.ids.length;
+							await store.addMembers(id, change.ids);
+						} else if (change.kind === "remove") {
+							counts.removed += change.ids.length;
+							await store.removeMembers(id, change.ids);
+						} else {
+							counts.replaced = true;
+							await store.setMembers(id, change.ids);
+						}
+					}
+					await record({ type: "group.patched", group: { id, displayName }, ...counts });
+				});
+				return group(id);
+			},
+			delete: (id: string) =>
+				commit(async (store, _tx, record) => {
+					const current = await store.group(id);
+					if (!current || !(await store.deleteGroup(id))) throw notFound();
+					await record({ type: "group.deleted", group: summary(current) });
+				}),
+		},
+	};
+}
