@@ -237,6 +237,35 @@ test("/Me and /Bulk answer 501, and only after authentication", async () => {
 	expect((await get(scim, "/Me", { headers: {} })).status).toBe(401);
 });
 
+test("attributes and excludedAttributes shape every resource response", async () => {
+	const { scim } = setup();
+	const idp = createTestProvider(scim, { dialect: "entra" });
+	const alice = await idp.createUser({ userName: "alice@x.test", givenName: "Alice", familyName: "Example" });
+	const group = await idp.createGroup("ops", [alice]);
+
+	const one = await get(scim, `/Users/${alice.id}?attributes=userName,name.givenName`);
+	expect(one.body).toEqual({
+		schemas: [USER],
+		id: alice.id,
+		userName: "alice@x.test",
+		name: { givenName: "Alice" },
+	});
+	const prefixed = await get(scim, `/Users/${alice.id}?attributes=${USER}:USERNAME`);
+	expect(Object.keys(prefixed.body)).toEqual(["schemas", "id", "userName"]);
+	const list = await get(scim, "/Groups?excludedAttributes=members");
+	expect(list.body.Resources[0].members).toBeUndefined();
+	expect(list.body.totalResults).toBe(1);
+	expect((await get(scim, `/Groups/${group.id}?excludedAttributes=members,id`)).body).toMatchObject({ id: group.id });
+	const sub = await get(scim, `/Groups/${group.id}?excludedAttributes=members.display`);
+	expect(sub.body.members[0]).toEqual({ value: alice.id, $ref: expect.any(String) });
+	const patched = await get(scim, `/Users/${alice.id}?attributes=active`, {
+		method: "PATCH",
+		headers: bodyHeaders,
+		body: JSON.stringify({ schemas: [PATCH], Operations: [{ op: "replace", path: "active", value: false }] }),
+	});
+	expect(patched.body).toEqual({ schemas: [USER], id: alice.id, active: false });
+});
+
 test("group PUT keeps an externalId it omits, and replaces members", async () => {
 	const { adapter, scim } = setup();
 	const groups = scim.forConnection("acme").groups;

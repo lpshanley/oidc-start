@@ -51,6 +51,44 @@ export function toGroup(g: ScimGroup, base: string) {
 	};
 }
 
+/** An attribute name as a lowercase path. A core schema's URN prefix is optional (RFC 7644 §3.10). */
+function selector(name: string) {
+	const lower = name.trim().toLowerCase();
+	for (const urn of [USER, GROUP]) {
+		const prefix = `${urn.toLowerCase()}:`;
+		if (lower.startsWith(prefix)) return lower.slice(prefix.length).split(".");
+	}
+	if (!lower.startsWith("urn:")) return lower.split(".");
+	const split = lower.lastIndexOf(":");
+	return [lower.slice(0, split), ...lower.slice(split + 1).split(".")];
+}
+const selectors = (list: string | null) => (list ?? "").split(",").filter((s) => s.trim()).map(selector);
+
+const ALWAYS = new Set(["schemas", "id"]);
+const startsWith = (path: string[], start: string[]) => start.every((part, i) => path[i] === part);
+
+/** Keeps a value's `keep`-listed paths, or drops its `drop`-listed ones. */
+function select(value: unknown, at: string[], keep: string[][] | null, drop: string[][]): unknown {
+	if (Array.isArray(value)) return value.map((item) => select(item, at, keep, drop));
+	if (typeof value !== "object" || value === null) return value;
+	const entries = Object.entries(value).flatMap(([key, child]): [string, unknown][] => {
+		const path = [...at, key.toLowerCase()];
+		if (path.length === 1 && ALWAYS.has(path[0])) return [[key, child]];
+		if (drop.some((d) => startsWith(path, d))) return [];
+		if (keep && !keep.some((k) => startsWith(path, k) || startsWith(k, path))) return [];
+		return [[key, select(child, path, keep?.some((k) => startsWith(path, k)) ? null : keep, drop)]];
+	});
+	return Object.fromEntries(entries);
+}
+
+/** Applies `attributes` and `excludedAttributes` to a resource (RFC 7644 §3.9). */
+export function project<T>(resource: T, params: URLSearchParams) {
+	const keep = selectors(params.get("attributes"));
+	const drop = selectors(params.get("excludedAttributes"));
+	if (!keep.length && !drop.length) return resource;
+	return select(resource, [], keep.length ? keep : null, drop) as Partial<T>;
+}
+
 export function serviceProviderConfig(documentationUri?: string) {
 	return {
 		schemas: ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],

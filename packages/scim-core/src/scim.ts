@@ -2,7 +2,7 @@ import type { ScimAdapter } from "./adapter.js";
 import { ScimError } from "./errors.js";
 import { createOperations, type ScimHooks } from "./operations.js";
 import { paging, parseFilter, parseGroup, patchGroup } from "./protocol.js";
-import { listResponse, resourceTypes, schemas, serviceProviderConfig, toGroup, toUser } from "./resources.js";
+import { listResponse, project, resourceTypes, schemas, serviceProviderConfig, toGroup, toUser } from "./resources.js";
 import type { ScimUser } from "./types.js";
 
 const TYPE = "application/scim+json";
@@ -125,20 +125,21 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 		if (resource === "ResourceTypes" && method === "GET") return discovery(resourceTypes(base), id);
 		if (resource === "Schemas" && method === "GET") return discovery(schemas(base), id);
 		const { users, groups } = forConnection(connection, method);
+		const view = <T,>(resource: T) => project(resource, url.searchParams);
 		if (resource === "Users") {
 			if (!id && method === "GET") {
 				const page = paging(url.searchParams);
 				const filter = parseFilter(url.searchParams.get("filter"), ["userName", "externalId"]);
 				const result = await users.list(filter, page.offset, page.limit);
-				return json(listResponse(result.items.map((u) => toUser(u, base)), result.total, page.startIndex));
+				return json(listResponse(result.items.map((u) => view(toUser(u, base))), result.total, page.startIndex));
 			}
 			if (!id && method === "POST") {
 				const user = toUser(await users.create(await body(request)), base);
-				return json(user, 201, { location: user.meta.location });
+				return json(view(user), 201, { location: user.meta.location });
 			}
-			if (id && method === "GET") return json(toUser(await users.get(id), base));
-			if (id && method === "PUT") return json(toUser(await users.replace(id, await body(request)), base));
-			if (id && method === "PATCH") return json(toUser(await users.patch(id, await body(request)), base));
+			if (id && method === "GET") return json(view(toUser(await users.get(id), base)));
+			if (id && method === "PUT") return json(view(toUser(await users.replace(id, await body(request)), base)));
+			if (id && method === "PATCH") return json(view(toUser(await users.patch(id, await body(request)), base)));
 			if (id && method === "DELETE") {
 				await users.delete(id);
 				return new Response(null, { status: 204 });
@@ -149,15 +150,15 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 				const page = paging(url.searchParams);
 				const filter = parseFilter(url.searchParams.get("filter"), ["displayName", "externalId"]);
 				const result = await groups.list(filter, page.offset, page.limit);
-				return json(listResponse(result.items.map((g) => toGroup(g, base)), result.total, page.startIndex));
+				return json(listResponse(result.items.map((g) => view(toGroup(g, base))), result.total, page.startIndex));
 			}
 			if (!id && method === "POST") {
 				const group = toGroup(await groups.create(parseGroup(await body(request))), base);
-				return json(group, 201, { location: group.meta.location });
+				return json(view(group), 201, { location: group.meta.location });
 			}
-			if (id && method === "GET") return json(toGroup(await groups.get(id), base));
-			if (id && method === "PUT") return json(toGroup(await groups.replace(id, parseGroup(await body(request))), base));
-			if (id && method === "PATCH") return json(toGroup(await groups.patch(id, patchGroup(await body(request))), base));
+			if (id && method === "GET") return json(view(toGroup(await groups.get(id), base)));
+			if (id && method === "PUT") return json(view(toGroup(await groups.replace(id, parseGroup(await body(request))), base)));
+			if (id && method === "PATCH") return json(view(toGroup(await groups.patch(id, patchGroup(await body(request))), base)));
 			if (id && method === "DELETE") {
 				await groups.delete(id);
 				return new Response(null, { status: 204 });
