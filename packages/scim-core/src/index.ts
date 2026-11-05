@@ -1,3 +1,4 @@
+export { createScim, type ScimOptions, type ScimProblem } from "./scim.js";
 export { createScimAdapter, type ScimAdapter, type ScimStore } from "./adapter.js";
 export { ScimConflictError, ScimError } from "./errors.js";
 export type { ScimChange, ScimHooks } from "./operations.js";
