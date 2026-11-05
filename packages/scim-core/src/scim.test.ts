@@ -24,7 +24,7 @@ const get = async (scim: ReturnType<typeof setup>["scim"], path: string, init: R
 	return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : undefined };
 };
 
-describe.each<ScimDialect>(["okta", "entra", "authentik"])("%s", (dialect) => {
+describe.each<ScimDialect>(["okta", "okta-wizard", "entra", "authentik"])("%s", (dialect) => {
 	test("runs a joiner, mover and leaver", async () => {
 		const deprovisioned = vi.fn(async () => {});
 		const { adapter, scim } = setup({ onUserDeprovisioned: deprovisioned });
@@ -47,6 +47,10 @@ describe.each<ScimDialect>(["okta", "entra", "authentik"])("%s", (dialect) => {
 		expect((await adapter.read("acme").user(alice.id))?.active).toBe(true);
 		await idp.rename(alice, "Alicia");
 		expect((await adapter.read("acme").user(alice.id))?.name?.givenName).toBe("Alicia");
+
+		await idp.renameGroup(ops, "operations");
+		expect((await idp.getGroup(ops.id)).displayName).toBe("operations");
+		expect((await idp.findUser("ALICE@x.test")).totalResults).toBe(1);
 
 		await idp.deleteUser(bob);
 		expect((await idp.getUser(bob.id)).status).toBe(404);

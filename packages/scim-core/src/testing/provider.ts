@@ -3,7 +3,8 @@ import { USER } from "../protocol.js";
 const PATCH = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 const GROUP = "urn:ietf:params:scim:schemas:core:2.0:Group";
 
-export type ScimDialect = "okta" | "entra" | "authentik";
+/** `okta` is an OIN integration. `okta-wizard` is an App Integration Wizard app, which updates with PUT. */
+export type ScimDialect = "okta" | "okta-wizard" | "entra" | "authentik";
 export type TestUser = { id: string; userName: string; externalId?: string };
 export type TestGroup = { id: string; displayName: string };
 type Person = { userName: string; externalId?: string; givenName?: string; familyName?: string };
@@ -62,7 +63,16 @@ export function createTestProvider(
 			? { op, path: "members", value: list(user) }
 			: { op, path: `members[value eq "${user.id}"]` };
 	};
+	const wizard = dialect === "okta-wizard";
+	/** Okta reads the resource, then sends it back with its change. */
+	const putBack = async (user: TestUser, change: Record<string, unknown>) =>
+		ok("PUT", `/Users/${user.id}`, { ...(await ok("GET", `/Users/${user.id}`)), ...change });
+	const putMembers = async (group: TestGroup, change: (members: { value: string }[]) => { value: string }[]) => {
+		const current = await ok("GET", `/Groups/${group.id}`);
+		return ok("PUT", `/Groups/${group.id}`, { ...current, members: change(current.members) });
+	};
 	const setActive = async (user: TestUser, person: Person, active: boolean) => {
+		if (wizard) return putBack(user, { active });
 		if (dialect === "okta") return patch(`/Users/${user.id}`, { op: "replace", value: { active } });
 		if (dialect === "entra")
 			return patch(`/Users/${user.id}`, { op: "Replace", path: "active", value: active ? "True" : "False" });
@@ -76,11 +86,13 @@ export function createTestProvider(
 		send,
 		createUser: (person: Person): Promise<TestUser> => ok("POST", "/Users", resource(person, true)),
 		getUser: (id: string) => send("GET", `/Users/${id}`),
-		findUser: (userName: string) => ok("GET", `/Users?filter=${encodeURIComponent(`userName eq "${userName}"`)}`),
+		findUser: (userName: string) =>
+			ok("GET", `/Users?filter=${encodeURIComponent(`userName eq "${userName}"`)}&startIndex=1&count=100`),
 		deactivate: (user: TestUser) => setActive(user, user, false),
 		reactivate: (user: TestUser) => setActive(user, user, true),
 		/** Changes a given name, including the attributes each provider sends alongside it. */
 		rename: (user: TestUser, givenName: string) => {
+			if (wizard) return putBack(user, { name: { givenName, familyName: "User" } });
 			if (dialect === "entra")
 				return patch(
 					`/Users/${user.id}`,
@@ -101,8 +113,17 @@ export function createTestProvider(
 			if (!inline && members.length) await patch(`/Groups/${group.id}`, ...members.map((m) => member("add", m)));
 			return group;
 		},
-		addMember: (group: TestGroup, user: TestUser) => patch(`/Groups/${group.id}`, member("add", user)),
-		removeMember: (group: TestGroup, user: TestUser) => patch(`/Groups/${group.id}`, member("remove", user)),
+		addMember: (group: TestGroup, user: TestUser) =>
+			wizard
+				? putMembers(group, (members) => [...members, { value: user.id }])
+				: patch(`/Groups/${group.id}`, member("add", user)),
+		removeMember: (group: TestGroup, user: TestUser) =>
+			wizard
+				? putMembers(group, (members) => members.filter((m) => m.value !== user.id))
+				: patch(`/Groups/${group.id}`, member("remove", user)),
+		/** Okta recommends a no-path replace carrying the group's id. */
+		renameGroup: (group: TestGroup, displayName: string) =>
+			patch(`/Groups/${group.id}`, { op: "replace", value: { id: group.id, displayName } }),
 		getGroup: (id: string) => ok("GET", `/Groups/${id}`),
 		deleteGroup: (group: TestGroup) => ok("DELETE", `/Groups/${group.id}`),
 	};
