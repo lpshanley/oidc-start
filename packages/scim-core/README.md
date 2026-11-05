@@ -10,11 +10,13 @@ This is an early release. It covers Users, Groups and discovery. It was extracte
 
 | Supported | Not supported yet |
 | --- | --- |
-| `/Users` and `/Groups`: create, read, list, PUT, PATCH, DELETE | Bulk operations |
-| `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | Sorting and ETags |
-| Bearer tokens, resolved to a connection per request | `attr eq "value"` is the only filter |
-| `userName`, `externalId`, `displayName`, `name`, `active`, group members | `attributes` and `excludedAttributes` |
-| Provider quirks: capitalized `op`, string booleans, no-path PATCH | Custom attributes and schema extensions. Unknown attributes are accepted and not stored |
+| `/Users` and `/Groups`: create, read, list, PUT, PATCH, DELETE | Bulk operations and `/Me`, which answer 501 |
+| `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | Sorting, ETags and `POST /.search` |
+| Bearer tokens, resolved to a connection per request | Filters beyond `eq` clauses joined by `and` |
+| The core User and Group schemas, except `password` and `groups`, plus the enterprise extension | Custom schema extensions. Unknown attributes are accepted and not stored |
+| `attributes` and `excludedAttributes` on every resource response | Groups as group members |
+| Filters on `id`, `userName`, `externalId`, `displayName`, `emails.value` and `emails[type eq "x"].value` | |
+| Provider quirks: capitalized `op`, string booleans, no-path PATCH | |
 
 ## Mount it
 
@@ -73,6 +75,10 @@ Providers authenticate with a bearer token, so exempt this path from any browser
 - **Omitted fields on PUT:** a missing `active` or `externalId` keeps its current value, so a sparse update can't reactivate someone or break a link.
 - **`externalId` is fixed once set:** changing it answers `400 mutability`, which is stricter than RFC 7643. A deactivation still goes through and keeps the stored value, and the change carries `externalIdConflict`.
 - **Storage failures answer 503, never 404:** a 404 would tell the provider the user is gone.
+- **Unknown attributes are accepted and dropped:** refusing one would fail the whole request, which might also be a deactivation. `/Schemas` lists what is kept.
+- **A typed value is created when missing:** a `replace` of `emails[type eq "work"].value` adds the address if there is none, where RFC 7644 asks for `noTarget`. Other unmatched value paths do answer `noTarget`.
+- **A missing `schemas` is accepted:** on any request, which is more lenient than the RFC.
+- **A change that changes nothing is skipped:** a PATCH or user PUT that leaves the resource as it was keeps its `lastModified`, and no hook runs.
 
 ## Use it without HTTP
 
@@ -86,11 +92,13 @@ await scim.forConnection(connection).users.deactivate(id);
 
 A connection is whatever `authenticate` returns, usually one customer's directory. Implement [`ScimStore`](src/adapter.ts) for one connection, and return it from `read` and from `transaction`. Stores must only see that connection's rows.
 
+A user has first-class `emails`, and `attributes` holds the rest of the schema, such as `title`, `phoneNumbers` and the enterprise extension under its URN. Store `attributes` as JSON and return it unchanged. `store.users` must also filter on `id`, `email` and `emailType`, and `testScimAdapter` checks this.
+
 To give hooks your own user fields, such as a linked OIDC subject, return them from the store and pass your type to `createScimAdapter<Connection, MyUser, MyTransaction>`.
 
 ## Test it
 
-`@lpshanley/scim-core/testing` has three tools:
+`@lpshanley/scim-core/testing` has these tools:
 
 ```ts
 import { createMemoryAdapter, createTestProvider, testScimAdapter } from "@lpshanley/scim-core/testing";
@@ -111,7 +119,26 @@ test("a leaver loses access", async () => {
 });
 ```
 
-`createMemoryAdapter()` is a single-process adapter for trying the package and for fast tests. The `okta`, `entra` and `authentik` dialects are modelled on vendor documentation and that app's records, not captured traffic, so they show your app handles those shapes, not that a real push works.
+`createMemoryAdapter()` is a single-process adapter for trying the package and for fast tests. The `okta`, `okta-wizard`, `entra` and `authentik` dialects are modelled on vendor documentation and that app's records, not captured traffic, so they show your app handles those shapes, not that a real push works. `okta` is an OIN integration, and `okta-wizard` is an App Integration Wizard app, which updates with PUT.
+
+### Capture real traffic
+
+`recordTraffic` wraps an instance and reports each exchange. Headers are never kept, passwords are dropped, and names, emails and filter values become placeholders. `replayTraffic` sends a recording to a fresh instance and returns any exchange whose status changed, so a provider's real requests can become a regression test:
+
+```ts
+const recording = readFileSync("okta.jsonl", "utf8").trim().split("\n").map((line) => JSON.parse(line));
+expect(await replayTraffic(scim, recording, { token })).toEqual([]);
+```
+
+Read a recording before you commit it, because an attribute the scrubber doesn't know about keeps its value.
+
+In this repository, `harness/server.mjs` is a throwaway server for this. It keeps users in memory, and it listens on localhost, so a provider needs an HTTPS tunnel to reach it:
+
+```bash
+pnpm --filter @lpshanley/scim-core build
+cd packages/scim-core
+SCIM_HARNESS_TOKEN="$(openssl rand -hex 32)" node harness/server.mjs
+```
 
 ## Use it with oidc-start
 
