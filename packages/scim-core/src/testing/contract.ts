@@ -8,6 +8,8 @@ const fields = (userName: string, more: Partial<ScimUserFields> = {}): ScimUserF
 	externalId: null,
 	displayName: null,
 	name: null,
+	emails: [],
+	attributes: {},
 	active: true,
 	...more,
 });
@@ -45,6 +47,8 @@ export function testScimAdapter<TConnection, TUser extends ScimUser, TTransactio
 			externalId: "ext-1",
 			displayName: "Alice",
 			name: { givenName: "Alice", familyName: "Example" },
+			emails: [{ value: "a@x.test", type: "work", primary: true }],
+			attributes: { title: "CTO", phoneNumbers: [{ type: "work", value: "1" }] },
 			active: false,
 		});
 		const created = await store.createUser(wanted);

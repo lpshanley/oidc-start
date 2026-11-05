@@ -41,11 +41,13 @@ type Options<TConnection, TUser extends ScimUser, TTransaction> = ScimHooks<TCon
 	afterCommitFailed(error: unknown): void;
 };
 
-const fieldsOf = ({ userName, externalId, displayName, name, active }: ScimUserFields): ScimUserFields => ({
+const fieldsOf = ({ userName, externalId, displayName, name, emails, attributes, active }: ScimUserFields): ScimUserFields => ({
 	userName,
 	externalId,
 	displayName,
 	name,
+	emails,
+	attributes,
 	active,
 });
 const summary = (g: { id: string; displayName: string }): GroupSummary => ({ id: g.id, displayName: g.displayName });

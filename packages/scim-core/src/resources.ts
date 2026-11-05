@@ -1,4 +1,4 @@
-import { GROUP, MAX_RESULTS, USER } from "./protocol.js";
+import { ENTERPRISE, GROUP, MAX_RESULTS, USER } from "./protocol.js";
 import type { ScimGroup, ScimUser } from "./types.js";
 
 const LIST = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
@@ -25,12 +25,14 @@ const meta = (
 
 export function toUser(u: ScimUser, base: string) {
 	return {
-		schemas: [USER],
+		schemas: ENTERPRISE in u.attributes ? [USER, ENTERPRISE] : [USER],
 		id: u.id,
 		...(u.externalId ? { externalId: u.externalId } : {}),
 		userName: u.userName,
 		...(u.displayName ? { displayName: u.displayName } : {}),
 		...(u.name ? { name: u.name } : {}),
+		...(u.emails.length ? { emails: u.emails } : {}),
+		...u.attributes,
 		active: u.active,
 		meta: meta("User", u, `${base}/Users/${u.id}`),
 	};

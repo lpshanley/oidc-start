@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { ScimError } from "./errors.js";
-import type { ScimGroupChange, ScimGroupFields, ScimName, ScimUserFields } from "./types.js";
+import type { ScimAttributes, ScimEmail, ScimGroupChange, ScimGroupFields, ScimName, ScimUserFields } from "./types.js";
 
 export const USER = "urn:ietf:params:scim:schemas:core:2.0:User";
 export const GROUP = "urn:ietf:params:scim:schemas:core:2.0:Group";
+export const ENTERPRISE = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
 const PATCH = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 export const MAX_RESULTS = 200;
 
@@ -30,6 +31,8 @@ const active = z.union([z.boolean(), z.stringbool({ truthy: ["true"], falsy: ["f
 	error: "active must be a boolean",
 });
 const jsonObject = z.looseObject({}, { error: "Expected a JSON object" });
+const jsonArray = z.array(jsonObject);
+type Json = Record<string, unknown>;
 
 const userResource = z.object(
 	{
@@ -46,7 +49,7 @@ const groupResource = z.object(
 	{ error: "Expected a JSON object" },
 );
 
-const NAME_PARTS = ["formatted", "givenName", "familyName"] as const;
+const NAME_PARTS = ["formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix"] as const;
 const nameObject = z.looseObject({}).catch({});
 function nameOf(value: unknown, current: ScimName | null = null): ScimName | null {
 	const given = nameObject.parse(value);
@@ -59,6 +62,170 @@ function nameOf(value: unknown, current: ScimName | null = null): ScimName | nul
 	return Object.keys(next).length ? next : null;
 }
 
+type User = Pick<ScimUserFields, "emails" | "attributes">;
+const SINGLE = ["nickName", "profileUrl", "title", "userType", "preferredLanguage", "locale", "timezone"];
+const MULTI = ["phoneNumbers", "ims", "photos", "addresses", "entitlements", "roles", "x509Certificates"];
+const ENTERPRISE_PARTS = ["employeeNumber", "costCenter", "organization", "division", "department", "manager"];
+const SUB_ATTRIBUTES = [
+	"value",
+	"display",
+	"type",
+	"primary",
+	"formatted",
+	"streetAddress",
+	"locality",
+	"region",
+	"postalCode",
+	"country",
+	"displayName",
+];
+const named = (names: string[], name: string) => names.find((n) => n.toLowerCase() === name.toLowerCase());
+
+type Target = { attribute: string; extension?: true; filter?: { name: string; value: string }; sub?: string };
+const VALUE_PATH = /^([a-z][\w$-]*)(?:\[\s*([a-z][\w$-]*)\s+eq\s+"([^"]*)"\s*\])?(?:\.([a-z][\w$-]*))?$/i;
+
+/** What a path or body key names among the attributes kept beyond the core ones, if anything. */
+function targetOf(path: string): Target | undefined {
+	const lower = path.toLowerCase();
+	const core = `${USER.toLowerCase()}:`;
+	const extension = lower.startsWith(`${ENTERPRISE.toLowerCase()}:`);
+	const rest = extension ? path.slice(ENTERPRISE.length + 1) : lower.startsWith(core) ? path.slice(core.length) : path;
+	const match = VALUE_PATH.exec(rest);
+	if (!match) return undefined;
+	const [, name, filterName, filterValue, subName] = match;
+	const sub = subName === undefined ? undefined : named(SUB_ATTRIBUTES, subName);
+	if (subName !== undefined && !sub) return undefined;
+	const attribute = named(extension ? ENTERPRISE_PARTS : ["emails", ...SINGLE, ...MULTI], name);
+	if (!attribute) return undefined;
+	const filter = filterName === undefined ? undefined : { name: filterName, value: filterValue };
+	return { attribute, ...(extension ? { extension: true } : {}), ...(filter ? { filter } : {}), ...(sub ? { sub } : {}) };
+}
+
+function entriesOf(value: unknown): Json[] {
+	if (typeof value === "string") return value.trim() ? [{ value }] : [];
+	const entry = jsonObject.safeParse(value);
+	if (!entry.success) return [];
+	const { primary, ...rest } = entry.data;
+	const flag = active.safeParse(primary);
+	return [{ ...rest, ...(flag.success ? { primary: flag.data } : {}) }];
+}
+
+/** A multi-valued attribute with no repeated pair and one primary (RFC 7643 §2.4). */
+function multiValued(value: unknown) {
+	const seen = new Set<string>();
+	const entries = (Array.isArray(value) ? value : [value]).flatMap(entriesOf).filter((e) => {
+		const key = JSON.stringify([e.type, e.value]);
+		return !seen.has(key) && seen.add(key);
+	});
+	const primary = entries.map((e) => e.primary === true).lastIndexOf(true);
+	return entries.map((e, i) => (e.primary === true && i !== primary ? { ...e, primary: false } : e));
+}
+
+const emailEntry = z.object({
+	value: z.string().max(256).trim().min(1),
+	type: text,
+	display: text,
+	primary: z.boolean().optional(),
+});
+function emailsOf(value: unknown): ScimEmail[] {
+	return multiValued(value).flatMap((entry) => {
+		const email = emailEntry.safeParse(entry);
+		if (!email.success) return [];
+		const { value, type, primary, display } = email.data;
+		return [{ value, ...(type ? { type } : {}), ...(primary === undefined ? {} : { primary }), ...(display ? { display } : {}) }];
+	});
+}
+
+const matching = (entry: Json, filter: NonNullable<Target["filter"]>) =>
+	String(entry[named(Object.keys(entry), filter.name) ?? filter.name] ?? "").toLowerCase() === filter.value.toLowerCase();
+
+/** Applies one write to a multi-valued attribute (RFC 7644 §3.5.2). */
+function writeEntries(entries: Json[], { filter, sub }: Target, value: unknown, op: "add" | "replace") {
+	if (!filter) {
+		if (sub) throw invalid("A sub-attribute of a list needs a filter");
+		return op === "add" ? [...entries, ...multiValued(value)] : multiValued(value);
+	}
+	const written = sub ? { [sub]: value } : (entriesOf(value)[0] ?? {});
+	if (entries.some((e) => matching(e, filter))) return entries.map((e) => (matching(e, filter) ? { ...e, ...written } : e));
+	// Entra sends replace for a typed value it has not set yet. Refusing would
+	// fail the whole request, which may also be ending someone's access.
+	if (op === "replace" && filter.name.toLowerCase() !== "type")
+		throw new ScimError(400, "noTarget", "No value matches the path");
+	return [...entries, { [filter.name]: filter.value, ...written }];
+}
+
+function removeEntries(entries: Json[], { filter, sub }: Target) {
+	if (!filter) return [];
+	if (!sub) return entries.filter((e) => !matching(e, filter));
+	return entries.map((e) => {
+		if (!matching(e, filter)) return e;
+		const { [sub]: _removed, ...rest } = e;
+		return rest;
+	});
+}
+
+const without = (attributes: ScimAttributes, key: string) => {
+	const { [key]: _removed, ...rest } = attributes;
+	return rest;
+};
+const assigned = (attributes: ScimAttributes, key: string, value: unknown) =>
+	value === undefined || (Array.isArray(value) && !value.length) ? without(attributes, key) : { ...attributes, [key]: value };
+
+function writeExtension(user: User, { attribute, sub }: Target, value: unknown) {
+	const stored = jsonObject.catch({}).parse(user.attributes[ENTERPRISE]);
+	let next: unknown = text.parse(value);
+	if (attribute === "manager") {
+		const manager = jsonObject.catch({}).parse(stored.manager);
+		if (sub) next = text.parse(value) === undefined ? without(manager, sub) : { ...manager, [sub]: text.parse(value) };
+		else {
+			const entry = entriesOf(value)[0];
+			next = entry ?? undefined;
+		}
+		if (next && !Object.keys(next).length) next = undefined;
+	}
+	const extension = assigned(stored, attribute, next);
+	user.attributes = assigned(user.attributes, ENTERPRISE, Object.keys(extension).length ? extension : undefined);
+}
+
+/** Stores one attribute beyond the core ones. A null or blank value clears it. */
+function writeAttribute(user: User, target: Target, value: unknown, op: "add" | "replace") {
+	const { attribute } = target;
+	if (target.extension) writeExtension(user, target, value);
+	else if (attribute === "emails") user.emails = emailsOf(writeEntries(user.emails, target, value, op));
+	else if (SINGLE.includes(attribute)) user.attributes = assigned(user.attributes, attribute, text.parse(value));
+	else {
+		const entries = jsonArray.catch([]).parse(user.attributes[attribute]);
+		user.attributes = assigned(user.attributes, attribute, multiValued(writeEntries(entries, target, value, op)));
+	}
+}
+
+function removeAttribute(user: User, target: Target) {
+	const { attribute } = target;
+	if (target.extension) writeExtension(user, target, undefined);
+	else if (attribute === "emails") user.emails = emailsOf(removeEntries(user.emails, target));
+	else if (SINGLE.includes(attribute)) user.attributes = without(user.attributes, attribute);
+	else {
+		const entries = jsonArray.catch([]).parse(user.attributes[attribute]);
+		user.attributes = assigned(user.attributes, attribute, multiValued(removeEntries(entries, target)));
+	}
+}
+
+/** Keeps a whole enterprise object or one of its parts. A password or other key is never kept. */
+function writeKey(user: User, key: string, value: unknown, op: "add" | "replace") {
+	if (key.toLowerCase() === ENTERPRISE.toLowerCase()) {
+		for (const [part, v] of Object.entries(jsonObject.catch({}).parse(value))) writeKey(user, `${ENTERPRISE}:${part}`, v, op);
+		return;
+	}
+	const target = targetOf(key);
+	if (target) writeAttribute(user, target, value, op);
+}
+
+function beyondCore(body: unknown): User {
+	const user: User = { emails: [], attributes: {} };
+	for (const [key, value] of Object.entries(read(jsonObject, body))) writeKey(user, key, value, "replace");
+	return user;
+}
+
 /** A full User resource from POST or PUT. */
 export function parseUser(body: unknown): ScimUserFields {
 	const user = read(userResource, body);
@@ -67,6 +234,7 @@ export function parseUser(body: unknown): ScimUserFields {
 		externalId: user.externalId ?? null,
 		displayName: user.displayName ?? null,
 		name: nameOf(user.name),
+		...beyondCore(body),
 		active: user.active ?? true,
 	};
 }
@@ -118,14 +286,13 @@ const attributePath = (path: unknown) => {
 };
 
 /**
- * Applies a PATCH to a user, in order: replace or add of `active`, `userName`,
- * `externalId`, `displayName`, `name` and `name.*`, with or without a path, and
- * remove of `displayName`, `name` and `name.*`. Other attributes are accepted
- * and not stored.
+ * Applies a PATCH to a user, in order. Attributes outside the core schema and
+ * its enterprise extension are accepted and not stored, because refusing them
+ * could block a deactivation sent in the same request.
  */
 export function patchUser(current: ScimUserFields, body: unknown): ScimUserFields {
 	const next = { ...current };
-	const set = (path: string, value: unknown) => {
+	const set = (path: string, value: unknown, op: "add" | "replace") => {
 		const p = attributePath(path);
 		if (p === "active") {
 			next.active = read(active.optional(), value) ?? next.active;
@@ -140,7 +307,7 @@ export function patchUser(current: ScimUserFields, body: unknown): ScimUserField
 		} else if (p.startsWith("name.")) {
 			const part = NAME_PARTS.find((n) => n.toLowerCase() === p.slice("name.".length));
 			if (part) next.name = nameOf({ [part]: value }, next.name);
-		}
+		} else writeKey(next, path, value, op);
 	};
 	for (const o of operations(body)) {
 		const op = opName(o);
@@ -151,12 +318,16 @@ export function patchUser(current: ScimUserFields, body: unknown): ScimUserField
 				throw new ScimError(400, "mutability", `Cannot remove ${path}`);
 			if (path === "displayname") next.displayName = null;
 			else if (path === "name") next.name = null;
-			else if (path.startsWith("name.")) set(path, undefined);
+			else if (path.startsWith("name.")) next.name = nameOf({ [path.slice("name.".length)]: undefined }, next.name);
+			else {
+				const target = targetOf(String(o.path));
+				if (target) removeAttribute(next, target);
+			}
 			continue;
 		}
 		if (op !== "replace" && op !== "add") throw invalid(`Unsupported op ${String(o.op)}`);
-		if (typeof o.path === "string" && o.path) set(o.path, o.value);
-		else for (const [k, v] of Object.entries(read(jsonObject, o.value))) set(k, v);
+		if (typeof o.path === "string" && o.path) set(o.path, o.value, op);
+		else for (const [k, v] of Object.entries(read(jsonObject, o.value))) set(k, v, op);
 	}
 	return next;
 }

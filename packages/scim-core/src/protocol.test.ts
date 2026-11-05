@@ -1,11 +1,13 @@
 import { expect, test } from "vitest";
-import { parseFilter, parseGroup, parseUser, paging, patchGroup, patchUser, replaceUser, USER } from "./protocol.js";
+import { ENTERPRISE, parseFilter, parseGroup, parseUser, paging, patchGroup, patchUser, replaceUser, USER } from "./protocol.js";
 
 const alice = {
 	externalId: "sub-1",
 	userName: "alice@x.test",
 	displayName: "Alice",
 	name: { givenName: "Alice", familyName: "Old" },
+	emails: [],
+	attributes: {},
 	active: true,
 };
 const PATCH = ["urn:ietf:params:scim:api:messages:2.0:PatchOp"];
@@ -23,6 +25,8 @@ test("a user keeps every name part, and displayName stays its own attribute", ()
 		externalId: null,
 		displayName: null,
 		name: { givenName: "Bob", familyName: "B" },
+		emails: [],
+		attributes: {},
 		active: true,
 	});
 	expect(() => parseUser({ externalId: "x" })).toThrow("userName");
@@ -140,4 +144,91 @@ test("group PATCH sets and clears externalId, with or without a path", () => {
 		{ kind: "externalId", externalId: "g-2" },
 	]);
 	expect(patchGroup({ Operations: [{ op: "remove", path: "externalId" }] })).toEqual([{ kind: "externalId", externalId: null }]);
+});
+
+const full = {
+	schemas: [USER, ENTERPRISE],
+	userName: "alice@x.test",
+	password: "never kept",
+	groups: [{ value: "g-1" }],
+	fooBar: "not a SCIM attribute",
+	title: "CTO",
+	preferredLanguage: "en-US",
+	name: { honorificPrefix: "Dr", givenName: "Alice" },
+	emails: [
+		{ type: "work", value: "alice@x.test", primary: "True" },
+		{ type: "other", value: "a@x.test", primary: true },
+		{ type: "other", value: "a@x.test" },
+		{ value: "" },
+	],
+	phoneNumbers: [{ type: "mobile", value: "1" }],
+	[ENTERPRISE]: { department: "Eng", manager: { value: "m-1", displayName: "Boss" }, secret: "dropped" },
+};
+
+test("a user keeps emails and known attributes, one primary, and nothing unknown or secret", () => {
+	const user = parseUser(full);
+	expect(user.name).toEqual({ honorificPrefix: "Dr", givenName: "Alice" });
+	expect(user.emails).toEqual([
+		{ value: "alice@x.test", type: "work", primary: false },
+		{ value: "a@x.test", type: "other", primary: true },
+	]);
+	expect(user.attributes).toEqual({
+		title: "CTO",
+		preferredLanguage: "en-US",
+		phoneNumbers: [{ type: "mobile", value: "1" }],
+		[ENTERPRISE]: { department: "Eng", manager: { value: "m-1", displayName: "Boss" } },
+	});
+	expect(JSON.stringify(user)).not.toContain("never kept");
+});
+
+test("PATCH writes the paths Entra documents", () => {
+	const user = patch(
+		{ op: "Add", path: 'emails[type eq "work"].value', value: "new@x.test" },
+		{ op: "Add", path: 'emails[type eq "work"].primary', value: "True" },
+		{ op: "Add", path: "title", value: "CTO" },
+		{ op: "Replace", path: 'phoneNumbers[type eq "mobile"].value', value: "2" },
+		{ op: "Add", path: 'addresses[type eq "work"].locality', value: "Oslo" },
+		{ op: "Add", path: `${ENTERPRISE}:department`, value: "Sales" },
+		{ op: "Add", path: `${ENTERPRISE}:manager`, value: "m-1" },
+	);
+	expect(user.emails).toEqual([{ value: "new@x.test", type: "work", primary: true }]);
+	expect(user.attributes).toEqual({
+		title: "CTO",
+		phoneNumbers: [{ type: "mobile", value: "2" }],
+		addresses: [{ type: "work", locality: "Oslo" }],
+		[ENTERPRISE]: { department: "Sales", manager: { value: "m-1" } },
+	});
+});
+
+test("PATCH replaces, merges, removes and clears extra attributes", () => {
+	const start = { ...alice, ...parseUser(full) };
+	const replaced = patchUser(start, {
+		Operations: [{ op: "replace", value: { emails: [{ value: "b@x.test" }], [ENTERPRISE]: { division: "D" } } }],
+	});
+	expect(replaced.emails).toEqual([{ value: "b@x.test" }]);
+	expect(replaced.attributes[ENTERPRISE]).toMatchObject({ department: "Eng", division: "D" });
+	const added = patchUser(start, { Operations: [{ op: "add", path: "emails", value: [{ value: "c@x.test", primary: true }] }] });
+	expect(added.emails.map((e) => e.primary)).toEqual([false, false, true]);
+	const removed = patchUser(start, {
+		Operations: [
+			{ op: "remove", path: 'emails[type eq "other"]' },
+			{ op: "remove", path: "title" },
+			{ op: "remove", path: "phoneNumbers" },
+			{ op: "remove", path: `${ENTERPRISE}:manager` },
+			{ op: "replace", path: "preferredLanguage", value: null },
+		],
+	});
+	expect(removed.emails.map((e) => e.type)).toEqual(["work"]);
+	expect(removed.attributes).toEqual({ [ENTERPRISE]: { department: "Eng" } });
+	const cleared = patchUser(removed, { Operations: [{ op: "remove", path: `${ENTERPRISE}:department` }] });
+	expect(cleared.attributes).toEqual({});
+});
+
+test("a value filter that matches nothing is noTarget unless it names a type", () => {
+	const start = { ...alice, emails: [{ value: "a@x.test", type: "work" }] };
+	expect(() => patchUser(start, { Operations: [{ op: "replace", path: 'emails[value eq "z@x.test"].type', value: "home" }] })).toThrow(
+		"No value matches the path",
+	);
+	expect(() => patchUser(start, { Operations: [{ op: "add", path: "emails.value", value: "z@x.test" }] })).toThrow("needs a filter");
+	expect(patchUser(start, { Operations: [{ op: "replace", path: "fooBar", value: "x" }] })).toEqual(start);
 });

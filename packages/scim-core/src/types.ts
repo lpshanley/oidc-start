@@ -1,9 +1,27 @@
-/** RFC 7643 §4.1.1 `name`, without honorifics. */
+/** RFC 7643 §4.1.1 `name`. */
 export type ScimName = {
 	formatted?: string;
-	givenName?: string;
 	familyName?: string;
+	givenName?: string;
+	middleName?: string;
+	honorificPrefix?: string;
+	honorificSuffix?: string;
 };
+
+/** One address from `emails` (RFC 7643 §4.1.2). */
+export type ScimEmail = {
+	value: string;
+	type?: string;
+	primary?: boolean;
+	display?: string;
+};
+
+/**
+ * The other attributes a provider sent, keyed as SCIM names them: `title`,
+ * `phoneNumbers`, and the enterprise extension under its URN. Store this as
+ * JSON and hand it back unchanged. It never holds a password.
+ */
+export type ScimAttributes = Record<string, unknown>;
 
 export type ScimUserFields = {
 	userName: string;
@@ -11,6 +29,8 @@ export type ScimUserFields = {
 	externalId: string | null;
 	displayName: string | null;
 	name: ScimName | null;
+	emails: ScimEmail[];
+	attributes: ScimAttributes;
 	active: boolean;
 };
 

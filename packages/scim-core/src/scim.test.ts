@@ -266,6 +266,28 @@ test("attributes and excludedAttributes shape every resource response", async ()
 	expect(patched.body).toEqual({ schemas: [USER], id: alice.id, active: false });
 });
 
+test("what a provider sends comes back, including the enterprise schema", async () => {
+	const { scim } = setup();
+	const idp = createTestProvider(scim, { dialect: "okta" });
+	const ent = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
+	const created = await idp.send("POST", "/Users", {
+		schemas: [USER, ent],
+		userName: "alice@x.test",
+		title: "CTO",
+		emails: [{ type: "work", value: "alice@x.test", primary: true }],
+		[ent]: { department: "Eng" },
+	});
+	expect(created.body).toMatchObject({
+		schemas: [USER, ent],
+		title: "CTO",
+		emails: [{ type: "work", value: "alice@x.test", primary: true }],
+		[ent]: { department: "Eng" },
+	});
+	const plain = await idp.send("POST", "/Users", { schemas: [USER], userName: "bob@x.test" });
+	expect(plain.body.schemas).toEqual([USER]);
+	expect(plain.body.emails).toBeUndefined();
+});
+
 test("group PUT keeps an externalId it omits, and replaces members", async () => {
 	const { adapter, scim } = setup();
 	const groups = scim.forConnection("acme").groups;

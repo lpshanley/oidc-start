@@ -3,6 +3,8 @@ export { createScimAdapter, type ScimAdapter, type ScimStore } from "./adapter.j
 export { ScimConflictError, ScimError } from "./errors.js";
 export type { ScimChange, ScimHooks } from "./operations.js";
 export type {
+	ScimAttributes,
+	ScimEmail,
 	ScimGroup,
 	ScimGroupChange,
 	ScimGroupFields,
