@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { ScimError } from "./errors.js";
 import type { ScimGroupChange, ScimGroupFields, ScimName, ScimUserFields } from "./types.js";
 
@@ -9,38 +10,50 @@ export const MAX_RESULTS = 200;
 const invalid = (detail: string) => new ScimError(400, "invalidValue", detail);
 const noTarget = () => new ScimError(400, "noTarget", "remove needs a path");
 
-type Json = Record<string, unknown>;
-const object = (v: unknown): Json => {
-	if (!v || typeof v !== "object" || Array.isArray(v)) throw invalid("Expected a JSON object");
-	return v as Json;
-};
-const text = (v: unknown, max = 256) =>
-	typeof v === "string" && v.trim() && v.length <= max ? v.trim() : undefined;
-const required = (v: unknown, attribute: string) => {
-	const value = text(v);
-	if (!value) throw invalid(`${attribute} must be a string`);
-	return value;
-};
-/** Some providers send booleans as strings. */
-const bool = (v: unknown) => {
-	if (typeof v === "boolean") return v;
-	return typeof v === "string" && /^(true|false)$/i.test(v) ? v.toLowerCase() === "true" : undefined;
-};
-
-function activeOf(u: Json) {
-	if (u.active === undefined) return undefined;
-	const active = bool(u.active);
-	if (active === undefined) throw invalid("active must be a boolean");
-	return active;
+/** Reads a required value, reporting the schema's first problem as a SCIM error. */
+function read<T>(schema: z.ZodType<T>, value: unknown) {
+	const result = schema.safeParse(value);
+	if (!result.success) throw invalid(result.error.issues[0].message);
+	return result.data;
 }
 
+const text = z.string().max(256).trim().min(1).optional().catch(undefined);
+const required = (attribute: string) => {
+	const error = `${attribute} must be a string`;
+	return z.string({ error }).max(256, error).trim().min(1, error);
+};
+const userName = required("userName");
+const externalId = required("externalId");
+const displayName = required("displayName");
+/** Some providers send booleans as strings. */
+const active = z.union([z.boolean(), z.stringbool({ truthy: ["true"], falsy: ["false"] })], {
+	error: "active must be a boolean",
+});
+const jsonObject = z.looseObject({}, { error: "Expected a JSON object" });
+
+const userResource = z.object(
+	{
+		userName,
+		externalId: text,
+		displayName: text,
+		name: z.unknown().optional(),
+		active: active.optional(),
+	},
+	{ error: "Expected a JSON object" },
+);
+const groupResource = z.object(
+	{ displayName, externalId: text, members: z.unknown().optional() },
+	{ error: "Expected a JSON object" },
+);
+
 const NAME_PARTS = ["formatted", "givenName", "familyName"] as const;
+const nameObject = z.looseObject({}).catch({});
 function nameOf(value: unknown, current: ScimName | null = null): ScimName | null {
-	const given = value && typeof value === "object" ? (value as Json) : {};
+	const given = nameObject.parse(value);
 	const next: ScimName = { ...current };
 	for (const part of NAME_PARTS) {
 		const key = Object.keys(given).find((k) => k.toLowerCase() === part.toLowerCase());
-		if (key) next[part] = text(given[key]);
+		if (key) next[part] = text.parse(given[key]);
 		if (next[part] === undefined) delete next[part];
 	}
 	return Object.keys(next).length ? next : null;
@@ -48,13 +61,13 @@ function nameOf(value: unknown, current: ScimName | null = null): ScimName | nul
 
 /** A full User resource from POST or PUT. */
 export function parseUser(body: unknown): ScimUserFields {
-	const u = object(body);
+	const user = read(userResource, body);
 	return {
-		userName: required(u.userName, "userName"),
-		externalId: text(u.externalId) ?? null,
-		displayName: text(u.displayName) ?? null,
-		name: nameOf(u.name),
-		active: activeOf(u) ?? true,
+		userName: user.userName,
+		externalId: user.externalId ?? null,
+		displayName: user.displayName ?? null,
+		name: nameOf(user.name),
+		active: user.active ?? true,
 	};
 }
 
@@ -68,17 +81,26 @@ export function replaceUser(current: ScimUserFields, body: unknown): ScimUserFie
 	return {
 		...fields,
 		externalId: fields.externalId ?? current.externalId,
-		active: activeOf(object(body)) ?? current.active,
+		active: read(userResource, body).active ?? current.active,
 	};
 }
 
-type Op = { op?: unknown; path?: unknown; value?: unknown };
-function operations(body: unknown): Op[] {
-	const b = object(body);
-	if (!Array.isArray(b.Operations) || !b.Operations.length) throw invalid("Operations are required");
-	if (Array.isArray(b.schemas) && !b.schemas.includes(PATCH)) throw invalid("Expected the PatchOp schema");
-	return b.Operations as Op[];
-}
+const operation = z.looseObject(
+	{ op: z.unknown().optional(), path: z.unknown().optional(), value: z.unknown().optional() },
+	{ error: "Each operation must be an object" },
+);
+type Op = z.infer<typeof operation>;
+const patchRequest = z.object(
+	{
+		Operations: z.array(operation, { error: "Operations are required" }).min(1, "Operations are required"),
+		schemas: z
+			.unknown()
+			.optional()
+			.refine((v) => !Array.isArray(v) || v.includes(PATCH), "Expected the PatchOp schema"),
+	},
+	{ error: "Expected a JSON object" },
+);
+const operations = (body: unknown): Op[] => read(patchRequest, body).Operations;
 const opName = (o: Op) => String(o.op ?? "").toLowerCase();
 /** A path may carry the schema it belongs to (RFC 7644 §3.10). */
 const attributePath = (path: unknown) => {
@@ -98,13 +120,13 @@ export function patchUser(current: ScimUserFields, body: unknown): ScimUserField
 	const set = (path: string, value: unknown) => {
 		const p = attributePath(path);
 		if (p === "active") {
-			next.active = activeOf({ active: value }) ?? next.active;
+			next.active = read(active.optional(), value) ?? next.active;
 		} else if (p === "username") {
-			next.userName = required(value, "userName");
+			next.userName = read(userName, value);
 		} else if (p === "externalid") {
-			next.externalId = required(value, "externalId");
+			next.externalId = read(externalId, value);
 		} else if (p === "displayname") {
-			next.displayName = text(value) ?? null;
+			next.displayName = text.parse(value) ?? null;
 		} else if (p === "name") {
 			next.name = nameOf(value, next.name);
 		} else if (p.startsWith("name.")) {
@@ -126,22 +148,25 @@ export function patchUser(current: ScimUserFields, body: unknown): ScimUserField
 		}
 		if (op !== "replace" && op !== "add") throw invalid(`Unsupported op ${String(o.op)}`);
 		if (typeof o.path === "string" && o.path) set(o.path, o.value);
-		else for (const [k, v] of Object.entries(object(o.value))) set(k, v);
+		else for (const [k, v] of Object.entries(read(jsonObject, o.value))) set(k, v);
 	}
 	return next;
 }
 
+const memberReference = z.looseObject({ value: z.string() });
+/** Skips entries that are not member references, as providers may send extra ones. */
 const memberIds = (v: unknown) =>
-	(Array.isArray(v) ? v : [v]).flatMap((m) =>
-		m && typeof m === "object" && typeof (m as Json).value === "string" ? [(m as Json).value as string] : [],
-	);
+	(Array.isArray(v) ? v : [v]).flatMap((m) => {
+		const member = memberReference.safeParse(m);
+		return member.success ? [member.data.value] : [];
+	});
 
 export function parseGroup(body: unknown): ScimGroupFields {
-	const g = object(body);
+	const group = read(groupResource, body);
 	return {
-		displayName: required(g.displayName, "displayName"),
-		externalId: text(g.externalId) ?? null,
-		memberIds: memberIds(g.members ?? []),
+		displayName: group.displayName,
+		externalId: group.externalId ?? null,
+		memberIds: memberIds(group.members ?? []),
 	};
 }
 
@@ -161,11 +186,11 @@ export function patchGroup(body: unknown): ScimGroupChange[] {
 			);
 		else if (op === "replace" && /^members$/i.test(path)) patch.push({ kind: "replace", ids: memberIds(o.value) });
 		else if ((op === "replace" || op === "add") && /^displayName$/i.test(path))
-			patch.push({ kind: "rename", displayName: required(o.value, "displayName") });
+			patch.push({ kind: "rename", displayName: read(displayName, o.value) });
 		else if ((op === "replace" || op === "add") && !path) {
-			const v = object(o.value);
+			const v = read(jsonObject, o.value);
 			if (v.displayName !== undefined)
-				patch.push({ kind: "rename", displayName: required(v.displayName, "displayName") });
+				patch.push({ kind: "rename", displayName: read(displayName, v.displayName) });
 			if (v.members !== undefined)
 				patch.push({ kind: op === "add" ? "add" : "replace", ids: memberIds(v.members) });
 		} else throw invalid(`Unsupported group operation ${op} ${path}`);

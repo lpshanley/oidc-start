@@ -119,3 +119,8 @@ test("paging is one-based and capped", () => {
 	expect(paging(new URLSearchParams("startIndex=0&count=9999"))).toEqual({ offset: 0, limit: 200, startIndex: 1 });
 	expect(paging(new URLSearchParams("count=0")).limit).toBe(0);
 });
+
+test("an operation that is not an object is refused", () => {
+	expect(() => patch(null)).toThrow("Each operation must be an object");
+	expect(() => patchGroup({ Operations: [1] })).toThrow("Each operation must be an object");
+});

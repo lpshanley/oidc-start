@@ -37,6 +37,9 @@
     "test": "vitest run",
     "check-package": "publint --strict"
   },
+  "dependencies": {
+    "zod": "catalog:"
+  },
   "devDependencies": {
     "typescript": "catalog:",
     "vitest": "catalog:",
