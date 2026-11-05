@@ -264,3 +264,28 @@ test("key handling cannot touch an object's prototype", () => {
 	expect((user as { admin?: boolean }).admin).toBeUndefined();
 	expect(({} as { admin?: boolean }).admin).toBeUndefined();
 });
+
+test("a PATCH path must be well formed and writable", () => {
+	const invalidPath = { status: 400, scimType: "invalidPath" };
+	const mutability = { status: 400, scimType: "mutability" };
+	const refusal = (fn: () => unknown) => {
+		try {
+			fn();
+		} catch (error) {
+			return error;
+		}
+	};
+	for (const path of ["a[[b", "a b", "emails[", "1abc", 5, "emails]"]) {
+		expect(refusal(() => patch({ op: "replace", path, value: "x" })), String(path)).toMatchObject(invalidPath);
+		expect(refusal(() => patchGroup({ Operations: [{ op: "replace", path, value: "x" }] }))).toMatchObject(invalidPath);
+	}
+	for (const path of ["id", "ID", "meta", "meta.created", `${USER}:id`, "groups", "schemas"])
+		expect(refusal(() => patch({ op: "replace", path, value: "x" })), path).toMatchObject(mutability);
+	expect(refusal(() => patch({ op: "remove", path: "meta.created" }))).toMatchObject(mutability);
+	expect(refusal(() => patchGroup({ Operations: [{ op: "replace", path: "id", value: "x" }] }))).toMatchObject(mutability);
+
+	expect(patch({ op: "replace", path: "fooBar", value: "x" })).toEqual(alice);
+	expect(patch({ op: "replace", path: 'emails[type eq "work" and primary eq true].value', value: "x" })).toEqual(alice);
+	expect(patch({ op: "replace", path: null, value: { displayName: "A" } }).displayName).toBe("A");
+	expect(patchGroup({ Operations: [{ op: "replace", value: { id: "g", displayName: "ops" } }] })).toEqual([{ kind: "rename", displayName: "ops" }]);
+});

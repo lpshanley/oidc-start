@@ -297,9 +297,20 @@ const patchRequest = z.preprocess(
 		{ error: "Expected a JSON object" },
 	),
 );
+const ATTRIBUTE_PATH = /^(?:urn:[^\s[\]]+:)?[a-z$][\w$-]*(?:\[[^[\]]+\])?(?:\.[a-z$][\w$-]*)?$/i;
+const READ_ONLY_PATH = /^(?:id|meta|groups|schemas)(?:[.[]|$)/i;
+
+/** Refuses a path that breaks the grammar (RFC 7644 §3.5.2), or that names a read-only attribute. */
+function checkPath(path: unknown) {
+	if (path === undefined || path === null || path === "") return;
+	if (typeof path !== "string" || !ATTRIBUTE_PATH.test(path)) throw new ScimError(400, "invalidPath", "Malformed path");
+	if (READ_ONLY_PATH.test(attributePath(path))) throw new ScimError(400, "mutability", `Cannot change ${path}`);
+}
+
 function operations(body: unknown): Op[] {
 	const ops = read(patchRequest, body).Operations;
 	for (const o of ops) {
+		checkPath(o.path);
 		const op = String(o.op ?? "").toLowerCase();
 		// Without this, a missing value would clear the attribute it names.
 		if ((op === "add" || op === "replace") && o.value === undefined) throw invalid(`${op} needs a value`);

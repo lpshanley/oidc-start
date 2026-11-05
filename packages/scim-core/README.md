@@ -77,6 +77,9 @@ Providers authenticate with a bearer token, so exempt this path from any browser
 - **Storage failures answer 503, never 404:** a 404 would tell the provider the user is gone.
 - **Unknown attributes are accepted and dropped:** refusing one would fail the whole request, which might also be a deactivation. `/Schemas` lists what is kept.
 - **A typed value is created when missing:** a `replace` of `emails[type eq "work"].value` adds the address if there is none, where RFC 7644 asks for `noTarget`. Other unmatched value paths do answer `noTarget`.
+- **PATCH paths are checked:** a malformed path answers `invalidPath`, and a path naming `id`, `meta`, `groups` or `schemas` answers `mutability`. A no-path PATCH ignores those keys, because Okta sends the group's `id` when renaming it.
+- **A value filter beyond `type` or `value` is dropped:** a path such as `emails[type eq "work" and primary eq true].value` is valid, not applied, and answers 200 like an unknown attribute.
+- **Two spellings of one attribute:** if a body has both `active` and `Active`, the canonical spelling wins.
 - **A missing `schemas` is accepted:** on any request, which is more lenient than the RFC.
 - **A change that changes nothing is skipped:** a PATCH or user PUT that leaves the resource as it was keeps its `lastModified`, and no hook runs.
 
