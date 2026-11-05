@@ -288,6 +288,19 @@ test("what a provider sends comes back, including the enterprise schema", async 
 	expect(plain.body.emails).toBeUndefined();
 });
 
+test("the lookups Entra can match on find the right user", async () => {
+	const { scim } = setup();
+	const idp = createTestProvider(scim, { dialect: "entra" });
+	const alice = await idp.createUser({ userName: "alice@x.test", externalId: "ext-1" });
+	await idp.createUser({ userName: "bob@x.test" });
+	const found = async (filter: string) =>
+		(await get(scim, `/Users?filter=${encodeURIComponent(filter)}`)).body.Resources.map((u: { id: string }) => u.id);
+	expect(await found('emails[type eq "work"].value eq "ALICE@x.test"')).toEqual([alice.id]);
+	expect(await found(`id eq "${alice.id}"`)).toEqual([alice.id]);
+	expect(await found('userName eq "alice@x.test" and externalId eq "ext-1"')).toEqual([alice.id]);
+	expect(await found('userName eq "alice@x.test" and externalId eq "other"')).toEqual([]);
+});
+
 test("group PUT keeps an externalId it omits, and replaces members", async () => {
 	const { adapter, scim } = setup();
 	const groups = scim.forConnection("acme").groups;

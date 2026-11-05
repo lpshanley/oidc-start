@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { ScimAdapter, ScimStore } from "./adapter.js";
 import { notFound, ScimError } from "./errors.js";
 import { patchUser, parseUser, replaceUser } from "./protocol.js";
-import type { ScimGroup, ScimGroupChange, ScimGroupFields, ScimUser, ScimUserFields } from "./types.js";
+import type { ScimGroup, ScimGroupChange, ScimGroupFields, ScimGroupFilter, ScimUser, ScimUserFields, ScimUserFilter } from "./types.js";
 
 type Details = Record<string, unknown>;
 type GroupSummary = { id: string; displayName: string };
@@ -139,7 +139,7 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 	return {
 		users: {
 			get: async (id: string) => (await adapter.read(connection).user(id)) ?? Promise.reject(notFound()),
-			list: (filter: { userName?: string; externalId?: string }, offset: number, limit: number) =>
+			list: (filter: ScimUserFilter, offset: number, limit: number) =>
 				adapter.read(connection).users(filter, offset, limit),
 			create: (body: unknown) => {
 				const fields = parseUser(body);
@@ -163,7 +163,7 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 		},
 		groups: {
 			get: group,
-			list: (filter: { displayName?: string; externalId?: string }, offset: number, limit: number) =>
+			list: (filter: ScimGroupFilter, offset: number, limit: number) =>
 				adapter.read(connection).groups(filter, offset, limit),
 			create: async (fields: ScimGroupFields): Promise<ScimGroup> => {
 				const id = await commit(async (store, _tx, record) => {

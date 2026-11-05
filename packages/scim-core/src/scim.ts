@@ -129,7 +129,7 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 		if (resource === "Users") {
 			if (!id && method === "GET") {
 				const page = paging(url.searchParams);
-				const filter = parseFilter(url.searchParams.get("filter"), ["userName", "externalId"]);
+				const filter = parseFilter(url.searchParams.get("filter"), ["id", "userName", "externalId", "email", "emailType"]);
 				const result = await users.list(filter, page.offset, page.limit);
 				return json(listResponse(result.items.map((u) => view(toUser(u, base))), result.total, page.startIndex));
 			}
@@ -148,7 +148,7 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 		if (resource === "Groups") {
 			if (!id && method === "GET") {
 				const page = paging(url.searchParams);
-				const filter = parseFilter(url.searchParams.get("filter"), ["displayName", "externalId"]);
+				const filter = parseFilter(url.searchParams.get("filter"), ["id", "displayName", "externalId"]);
 				const result = await groups.list(filter, page.offset, page.limit);
 				return json(listResponse(result.items.map((g) => view(toGroup(g, base))), result.total, page.startIndex));
 			}

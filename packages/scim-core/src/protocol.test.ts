@@ -232,3 +232,14 @@ test("a value filter that matches nothing is noTarget unless it names a type", (
 	expect(() => patchUser(start, { Operations: [{ op: "add", path: "emails.value", value: "z@x.test" }] })).toThrow("needs a filter");
 	expect(patchUser(start, { Operations: [{ op: "replace", path: "fooBar", value: "x" }] })).toEqual(start);
 });
+
+test("filters join eq clauses with and, and reach emails", () => {
+	const users = ["id", "userName", "externalId", "email", "emailType"] as const;
+	expect(parseFilter('userName eq "a" and externalId eq "b"', users)).toEqual({ userName: "a", externalId: "b" });
+	expect(parseFilter('USERNAME eq "x and y"  AND id eq "1"', users)).toEqual({ userName: "x and y", id: "1" });
+	expect(parseFilter('emails.value eq "a@x.test"', users)).toEqual({ email: "a@x.test" });
+	expect(parseFilter('emails[type eq "work"].value eq "a@x.test"', users)).toEqual({ email: "a@x.test", emailType: "work" });
+	for (const bad of ['userName eq "a" or id eq "1"', 'userName eq "a" and userName eq "b"', "active eq true", 'emails.type eq "x"'])
+		expect(() => parseFilter(bad, users), bad).toThrow("Unsupported filter");
+	expect(() => parseFilter('emails.value eq "a"', ["displayName"])).toThrow("Unsupported filter");
+});

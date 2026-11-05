@@ -381,13 +381,32 @@ export function patchGroup(body: unknown): ScimGroupChange[] {
 	return patch;
 }
 
-/** `attr eq "value"`, the filter identity providers send to find a resource. */
+const CLAUSE = /^\s*(?:([a-z][\w.]*)|emails\[\s*type\s+eq\s+"((?:[^"\\]|\\.)*)"\s*\]\.value)\s+eq\s+"((?:[^"\\]|\\.)*)"\s*$/i;
+const unescaped = (value: string) => value.replace(/\\(.)/g, "$1");
+const unsupported = () => new ScimError(400, "invalidFilter", "Unsupported filter");
+
+/**
+ * The filters providers send to find a resource: `attr eq "value"` clauses
+ * joined by `and`. `emails.value` and `emails[type eq "x"].value` become the
+ * `email` and `emailType` keys.
+ */
 export function parseFilter<A extends string>(filter: string | null, allowed: readonly A[]): Partial<Record<A, string>> {
 	if (!filter) return {};
-	const m = /^\s*([A-Za-z.]+)\s+eq\s+"((?:[^"\\]|\\.)*)"\s*$/i.exec(filter);
-	const attr = m && allowed.find((a) => a.toLowerCase() === m[1].toLowerCase());
-	if (!m || !attr) throw new ScimError(400, "invalidFilter", "Unsupported filter");
-	return { [attr]: m[2].replace(/\\(.)/g, "$1") } as Partial<Record<A, string>>;
+	const result: Partial<Record<string, string>> = {};
+	const add = (key: string, value: string) => {
+		if (result[key] !== undefined && result[key] !== value) throw unsupported();
+		result[key] = value;
+	};
+	for (const clause of filter.split(/\s+and\s+(?=(?:[^"]*"[^"]*")*[^"]*$)/i)) {
+		const match = CLAUSE.exec(clause);
+		if (!match) throw unsupported();
+		const [, attribute, emailType, value] = match;
+		const key = emailType !== undefined || attribute.toLowerCase() === "emails.value" ? "email" : allowed.find((a) => a.toLowerCase() === attribute.toLowerCase());
+		if (!key || !allowed.includes(key as A)) throw unsupported();
+		add(key, unescaped(value));
+		if (emailType !== undefined) add("emailType", unescaped(emailType));
+	}
+	return result as Partial<Record<A, string>>;
 }
 
 export function paging(params: URLSearchParams) {

@@ -8,8 +8,10 @@ export type {
 	ScimGroup,
 	ScimGroupChange,
 	ScimGroupFields,
+	ScimGroupFilter,
 	ScimName,
 	ScimPage,
 	ScimUser,
 	ScimUserFields,
+	ScimUserFilter,
 } from "./types.js";

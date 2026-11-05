@@ -1,4 +1,4 @@
-import type { ScimGroup, ScimGroupFields, ScimPage, ScimUser, ScimUserFields } from "./types.js";
+import type { ScimGroup, ScimGroupFields, ScimGroupFilter, ScimPage, ScimUser, ScimUserFields, ScimUserFilter } from "./types.js";
 
 /**
  * Storage for one connection. Inside a transaction, `user` and `group` should
@@ -11,14 +11,18 @@ import type { ScimGroup, ScimGroupFields, ScimPage, ScimUser, ScimUserFields } f
  */
 export interface ScimStore<TUser extends ScimUser = ScimUser> {
 	user(id: string): Promise<TUser | undefined>;
-	/** `userName` matches case-insensitively (RFC 7643 §4.1.1). Order must be stable across pages. */
-	users(filter: { userName?: string; externalId?: string }, offset: number, limit: number): Promise<ScimPage<TUser>>;
+	/**
+	 * Every given key must match. `userName`, `email` and `emailType` match
+	 * case-insensitively, and `emailType` applies to the same address as `email`.
+	 * Order must be stable across pages.
+	 */
+	users(filter: ScimUserFilter, offset: number, limit: number): Promise<ScimPage<TUser>>;
 	createUser(fields: ScimUserFields): Promise<TUser>;
 	replaceUser(id: string, fields: ScimUserFields): Promise<TUser | undefined>;
 	/** Also removes the user from every group. */
 	deleteUser(id: string): Promise<TUser | undefined>;
 	group(id: string): Promise<ScimGroup | undefined>;
-	groups(filter: { displayName?: string; externalId?: string }, offset: number, limit: number): Promise<ScimPage<ScimGroup>>;
+	groups(filter: ScimGroupFilter, offset: number, limit: number): Promise<ScimPage<ScimGroup>>;
 	createGroup(fields: ScimGroupFields): Promise<string>;
 	/** An undefined externalId keeps the current value. */
 	renameGroup(id: string, displayName: string, externalId?: string | null): Promise<boolean>;

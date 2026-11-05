@@ -57,6 +57,16 @@ export type ScimGroup = Stored & {
 	members: { id: string; userName: string }[];
 };
 
+export type ScimUserFilter = {
+	id?: string;
+	userName?: string;
+	externalId?: string;
+	email?: string;
+	emailType?: string;
+};
+
+export type ScimGroupFilter = { id?: string; displayName?: string; externalId?: string };
+
 export type ScimPage<T> = { total: number; items: T[] };
 
 /** One change to a group. A PATCH applies these in order (RFC 7644 §3.5.2). */

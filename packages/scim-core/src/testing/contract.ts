@@ -77,6 +77,19 @@ export function testScimAdapter<TConnection, TUser extends ScimUser, TTransactio
 		assert.equal((await store.users({ externalId: "EXT-1" }, 0, 10)).total, 0);
 	});
 
+	check("combines user filters, and finds users by id and email", async (store) => {
+		const emails = [{ value: "Work@X.test", type: "work" }, { value: "home@x.test", type: "home" }];
+		const a = await store.createUser(fields("a@x.test", { externalId: "ext-1", emails }));
+		await store.createUser(fields("b@x.test", { emails: [{ value: "work@x.test", type: "home" }] }));
+		const ids = async (filter: Parameters<typeof store.users>[0]) => (await store.users(filter, 0, 10)).items.map((u) => u.id);
+		assert.deepEqual(await ids({ id: a.id }), [a.id]);
+		assert.equal((await ids({ email: "WORK@x.test" })).length, 2);
+		assert.deepEqual(await ids({ email: "work@x.test", emailType: "WORK" }), [a.id]);
+		assert.deepEqual(await ids({ email: "home@x.test", emailType: "work" }), []);
+		assert.deepEqual(await ids({ userName: "a@x.test", externalId: "ext-1" }), [a.id]);
+		assert.deepEqual(await ids({ userName: "a@x.test", externalId: "other" }), []);
+	});
+
 	check("pages users in a stable order with the full total", async (store) => {
 		for (const n of [1, 2, 3, 4, 5]) await store.createUser(fields(`u${n}@x.test`));
 		const seen: string[] = [];
@@ -139,6 +152,7 @@ export function testScimAdapter<TConnection, TUser extends ScimUser, TTransactio
 		assert.equal((await store.group(group))?.externalId, null);
 		assert.equal(await store.renameGroup("missing", "None"), false);
 		assert.equal((await store.groups({ displayName: "Platform" }, 0, 10)).total, 1);
+		assert.equal((await store.groups({ id: group }, 0, 10)).total, 1);
 		await rejectsWith(store.createGroup({ displayName: "Platform", externalId: null, memberIds: [] }), conflict);
 		assert.equal(await store.deleteGroup(group), true);
 		assert.equal(await store.deleteGroup(group), false);

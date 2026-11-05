@@ -46,8 +46,15 @@ function storeOf(state: State, now: () => number): ScimStore {
 		async users(f, offset, limit) {
 			const items = [...state.users.values()].filter(
 				(u) =>
+					(f.id === undefined || u.id === f.id) &&
 					(f.userName === undefined || lower(u.userName) === lower(f.userName)) &&
-					(f.externalId === undefined || u.externalId === f.externalId),
+					(f.externalId === undefined || u.externalId === f.externalId) &&
+					(f.email === undefined ||
+						u.emails.some(
+							(e) =>
+								lower(e.value) === lower(f.email!) &&
+								(f.emailType === undefined || lower(e.type ?? "") === lower(f.emailType)),
+						)),
 			);
 			return copy(page(items, offset, limit));
 		},
@@ -80,6 +87,7 @@ function storeOf(state: State, now: () => number): ScimStore {
 		async groups(f, offset, limit) {
 			const items = [...state.groups.values()].filter(
 				(g) =>
+					(f.id === undefined || g.id === f.id) &&
 					(f.displayName === undefined || g.displayName === f.displayName) &&
 					(f.externalId === undefined || g.externalId === f.externalId),
 			);
