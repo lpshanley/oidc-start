@@ -42,6 +42,7 @@ export type ScimPage<T> = { total: number; items: T[] };
 /** One change to a group. A PATCH applies these in order (RFC 7644 §3.5.2). */
 export type ScimGroupChange =
 	| { kind: "rename"; displayName: string }
+	| { kind: "externalId"; externalId: string | null }
 	| { kind: "add"; ids: string[] }
 	| { kind: "remove"; ids: string[] }
 	| { kind: "replace"; ids: string[] };

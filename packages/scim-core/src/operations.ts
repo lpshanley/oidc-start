@@ -54,9 +54,10 @@ const summary = (g: { id: string; displayName: string }): GroupSummary => ({ id:
 function unchanged(group: ScimGroup, patch: ScimGroupChange[]) {
 	const before = group.members.map((m) => m.id);
 	const members = new Set(before);
-	let { displayName } = group;
+	let { displayName, externalId } = group;
 	for (const change of patch) {
 		if (change.kind === "rename") displayName = change.displayName;
+		else if (change.kind === "externalId") externalId = change.externalId;
 		else if (change.kind === "add") for (const id of change.ids) members.add(id);
 		else if (change.kind === "remove") for (const id of change.ids) members.delete(id);
 		else {
@@ -64,7 +65,12 @@ function unchanged(group: ScimGroup, patch: ScimGroupChange[]) {
 			for (const id of change.ids) members.add(id);
 		}
 	}
-	return displayName === group.displayName && members.size === before.length && before.every((id) => members.has(id));
+	return (
+		displayName === group.displayName &&
+		externalId === group.externalId &&
+		members.size === before.length &&
+		before.every((id) => members.has(id))
+	);
 }
 
 /**
@@ -194,6 +200,8 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 						if (change.kind === "rename") {
 							displayName = change.displayName;
 							await store.renameGroup(id, displayName);
+						} else if (change.kind === "externalId") {
+							await store.renameGroup(id, displayName, change.externalId);
 						} else if (change.kind === "add") {
 							counts.added += change.ids.length;
 							await store.addMembers(id, change.ids);

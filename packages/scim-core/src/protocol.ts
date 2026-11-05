@@ -178,7 +178,7 @@ export function parseGroup(body: unknown): ScimGroupFields {
 	};
 }
 
-/** Group PATCH: add or remove members (also `members[value eq "id"]`), replace displayName or members. */
+/** Group PATCH: add or remove members (also `members[value eq "id"]`), replace displayName, members or externalId. */
 export function patchGroup(body: unknown): ScimGroupChange[] {
 	const patch: ScimGroupChange[] = [];
 	for (const o of operations(body)) {
@@ -186,7 +186,10 @@ export function patchGroup(body: unknown): ScimGroupChange[] {
 		const path = String(o.path ?? "");
 		const filtered = /^members\[value eq "([^"]+)"\]$/i.exec(path);
 		if (op === "remove" && !path) throw noTarget();
-		if (op === "add" && /^members$/i.test(path)) patch.push({ kind: "add", ids: memberIds(o.value) });
+		if (op === "remove" && /^externalId$/i.test(path)) patch.push({ kind: "externalId", externalId: null });
+		else if ((op === "replace" || op === "add") && /^externalId$/i.test(path))
+			patch.push({ kind: "externalId", externalId: read(externalId, o.value) });
+		else if (op === "add" && /^members$/i.test(path)) patch.push({ kind: "add", ids: memberIds(o.value) });
 		else if (op === "remove" && filtered) patch.push({ kind: "remove", ids: [filtered[1]] });
 		else if (op === "remove" && /^members$/i.test(path))
 			patch.push(
@@ -199,6 +202,7 @@ export function patchGroup(body: unknown): ScimGroupChange[] {
 			const v = read(jsonObject, o.value);
 			if (v.displayName !== undefined)
 				patch.push({ kind: "rename", displayName: read(displayName, v.displayName) });
+			if (v.externalId !== undefined) patch.push({ kind: "externalId", externalId: read(externalId, v.externalId) });
 			if (v.members !== undefined)
 				patch.push({ kind: op === "add" ? "add" : "replace", ids: memberIds(v.members) });
 		} else throw invalid(`Unsupported group operation ${op} ${path}`);

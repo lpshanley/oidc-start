@@ -230,6 +230,13 @@ test("a PATCH that changes nothing leaves the resource and its history alone", a
 	expect(changes).toEqual([]);
 });
 
+test("/Me and /Bulk answer 501, and only after authentication", async () => {
+	const { scim } = setup();
+	expect((await get(scim, "/Me")).status).toBe(501);
+	expect((await get(scim, "/Bulk", { method: "POST", headers: bodyHeaders, body: "{}" })).status).toBe(501);
+	expect((await get(scim, "/Me", { headers: {} })).status).toBe(401);
+});
+
 test("group PUT keeps an externalId it omits, and replaces members", async () => {
 	const { adapter, scim } = setup();
 	const groups = scim.forConnection("acme").groups;

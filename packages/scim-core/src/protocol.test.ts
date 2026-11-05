@@ -131,3 +131,13 @@ test("add and replace need a value, so a missing one cannot clear an attribute",
 	expect(() => patchGroup({ Operations: [{ op: "replace", path: "members" }] })).toThrow("replace needs a value");
 	expect(patch({ op: "replace", path: "displayName", value: null }).displayName).toBeNull();
 });
+
+test("group PATCH sets and clears externalId, with or without a path", () => {
+	expect(patchGroup({ Operations: [{ op: "replace", path: "externalId", value: "g-1" }] })).toEqual([
+		{ kind: "externalId", externalId: "g-1" },
+	]);
+	expect(patchGroup({ Operations: [{ op: "replace", value: { externalId: "g-2" } }] })).toEqual([
+		{ kind: "externalId", externalId: "g-2" },
+	]);
+	expect(patchGroup({ Operations: [{ op: "remove", path: "externalId" }] })).toEqual([{ kind: "externalId", externalId: null }]);
+});

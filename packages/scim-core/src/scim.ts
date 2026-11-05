@@ -118,6 +118,8 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 			url.searchParams.has("filter")
 		)
 			throw new ScimError(403, undefined, "Filtering is not supported");
+		// RFC 7644 §3.11, and bulk is declared unsupported in discovery.
+		if (resource === "Me" || resource === "Bulk") throw new ScimError(501, undefined, "Not supported");
 		if (resource === "ServiceProviderConfig" && method === "GET")
 			return json(serviceProviderConfig(options.documentationUri));
 		if (resource === "ResourceTypes" && method === "GET") return discovery(resourceTypes(base), id);
