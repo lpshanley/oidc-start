@@ -6,6 +6,7 @@ OpenID Connect sign-in and app-managed grants for Node.js, with a TanStack Start
 | --- | --- |
 | `@lpshanley/oidc-start-core` | The root exports `createOidcCore`, session types and the session registry contract. Use `/models` for browser-safe user models and `/config` or `/provider` for server configuration and provider calls. |
 | `@lpshanley/oidc-start-react` | Use `/client` for `AuthProvider`, `useAuth`, `useUser`, `SignedIn` and `SignedOut`. Use `/functions` for browser-callable server functions and route guards, and `/server` for the core and request context. The package root exports user models, display and error helpers, middleware and HTTP route handlers. |
+| `@lpshanley/scim-core` | SCIM 2.0 provisioning for fetch-based servers. Use the root for `createScim` and `createScimAdapter`, and `/testing` for the adapter contract and test provider. It does not depend on the OIDC packages. [Guide](packages/scim-core/README.md) |
 
 The host app decides which accounts may hold a session, supplies a persistent session registry and registers its callback URLs with the provider. The React adapter uses the host's TanStack Start and Router installations.
 
