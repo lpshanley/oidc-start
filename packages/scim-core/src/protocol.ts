@@ -18,6 +18,22 @@ function read<T>(schema: z.ZodType<T>, value: unknown) {
 	return result.data;
 }
 
+/**
+ * Renames keys to their canonical spelling, because attribute names are
+ * case-insensitive (RFC 7643 §2.1). If both spellings arrive, the canonical
+ * one wins, so a stray `Active` cannot override `active`.
+ */
+const keysNamed = (names: string[]) => (value: unknown) => {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+	const given = value as Record<string, unknown>;
+	return Object.fromEntries(
+		Object.entries(given).flatMap(([key, v]) => {
+			const name = names.find((n) => n.toLowerCase() === key.toLowerCase());
+			return name && name !== key && Object.hasOwn(given, name) ? [] : [[name ?? key, v]];
+		}),
+	);
+};
+
 const text = z.string().max(256).trim().min(1).optional().catch(undefined);
 const required = (attribute: string) => {
 	const error = `${attribute} must be a string`;
@@ -34,19 +50,25 @@ const jsonObject = z.looseObject({}, { error: "Expected a JSON object" });
 const jsonArray = z.array(jsonObject);
 type Json = Record<string, unknown>;
 
-const userResource = z.object(
-	{
-		userName,
-		externalId: text,
-		displayName: text,
-		name: z.unknown().optional(),
-		active: active.optional(),
-	},
-	{ error: "Expected a JSON object" },
+const userResource = z.preprocess(
+	keysNamed(["userName", "externalId", "displayName", "name", "active"]),
+	z.object(
+		{
+			userName,
+			externalId: text,
+			displayName: text,
+			name: z.unknown().optional(),
+			active: active.optional(),
+		},
+		{ error: "Expected a JSON object" },
+	),
 );
-const groupResource = z.object(
-	{ displayName, externalId: text, members: z.unknown().optional() },
-	{ error: "Expected a JSON object" },
+const groupResource = z.preprocess(
+	keysNamed(["displayName", "externalId", "members"]),
+	z.object(
+		{ displayName, externalId: text, members: z.unknown().optional() },
+		{ error: "Expected a JSON object" },
+	),
 );
 
 const NAME_PARTS = ["formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix"] as const;
@@ -103,7 +125,7 @@ function targetOf(path: string): Target | undefined {
 
 function entriesOf(value: unknown): Json[] {
 	if (typeof value === "string") return value.trim() ? [{ value }] : [];
-	const entry = jsonObject.safeParse(value);
+	const entry = jsonObject.safeParse(keysNamed(SUB_ATTRIBUTES)(value));
 	if (!entry.success) return [];
 	const { primary, ...rest } = entry.data;
 	const flag = active.safeParse(primary);
@@ -253,20 +275,27 @@ export function replaceUser(current: ScimUserFields, body: unknown): ScimUserFie
 	};
 }
 
-const operation = z.looseObject(
-	{ op: z.unknown().optional(), path: z.unknown().optional(), value: z.unknown().optional() },
-	{ error: "Each operation must be an object" },
+const operation = z.preprocess(
+	keysNamed(["op", "path", "value"]),
+	z.looseObject(
+		{ op: z.unknown().optional(), path: z.unknown().optional(), value: z.unknown().optional() },
+		{ error: "Each operation must be an object" },
+	),
 );
 type Op = z.infer<typeof operation>;
-const patchRequest = z.object(
-	{
-		Operations: z.array(operation, { error: "Operations are required" }).min(1, "Operations are required"),
-		schemas: z
-			.unknown()
-			.optional()
-			.refine((v) => !Array.isArray(v) || v.includes(PATCH), "Expected the PatchOp schema"),
-	},
-	{ error: "Expected a JSON object" },
+const isPatchUrn = (v: unknown) => typeof v === "string" && v.toLowerCase() === PATCH.toLowerCase();
+const patchRequest = z.preprocess(
+	keysNamed(["Operations", "schemas"]),
+	z.object(
+		{
+			Operations: z.array(operation, { error: "Operations are required" }).min(1, "Operations are required"),
+			schemas: z
+				.unknown()
+				.optional()
+				.refine((v) => !Array.isArray(v) || v.some(isPatchUrn), "Expected the PatchOp schema"),
+		},
+		{ error: "Expected a JSON object" },
+	),
 );
 function operations(body: unknown): Op[] {
 	const ops = read(patchRequest, body).Operations;
@@ -332,7 +361,7 @@ export function patchUser(current: ScimUserFields, body: unknown): ScimUserField
 	return next;
 }
 
-const memberReference = z.looseObject({ value: z.string() });
+const memberReference = z.preprocess(keysNamed(["value"]), z.looseObject({ value: z.string() }));
 /** Skips entries that are not member references, as providers may send extra ones. */
 const memberIds = (v: unknown) =>
 	(Array.isArray(v) ? v : [v]).flatMap((m) => {

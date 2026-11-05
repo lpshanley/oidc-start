@@ -243,3 +243,24 @@ test("filters join eq clauses with and, and reach emails", () => {
 		expect(() => parseFilter(bad, users), bad).toThrow("Unsupported filter");
 	expect(() => parseFilter('emails.value eq "a"', ["displayName"])).toThrow("Unsupported filter");
 });
+
+test("attribute names match in any case, and the canonical spelling wins", () => {
+	expect(parseUser({ USERNAME: "bob", Active: false, DisplayName: "B", EMAILS: [{ VALUE: "b@x.test", TYPE: "work" }] })).toMatchObject({
+		userName: "bob",
+		active: false,
+		displayName: "B",
+		emails: [{ value: "b@x.test", type: "work" }],
+	});
+	expect(parseUser({ userName: "bob", active: false, Active: true }).active).toBe(false);
+	expect(parseUser({ userName: "bob", Active: true, active: false }).active).toBe(false);
+	expect(parseGroup({ DISPLAYNAME: "ops", Members: [{ Value: "u1" }] })).toMatchObject({ displayName: "ops", memberIds: ["u1"] });
+	expect(() => parseUser({ Active: false })).toThrow("userName");
+	expect(patchUser(alice, { operations: [{ OP: "replace", PATH: "active", VALUE: false }] }).active).toBe(false);
+	expect(patchUser(alice, { schemas: [PATCH[0].toUpperCase()], Operations: [{ op: "replace", path: "active", value: false }] }).active).toBe(false);
+});
+
+test("key handling cannot touch an object's prototype", () => {
+	const user = parseUser(JSON.parse('{"userName":"bob","__proto__":{"admin":true},"emails":[{"value":"b@x.test","__proto__":{"admin":true}}]}'));
+	expect((user as { admin?: boolean }).admin).toBeUndefined();
+	expect(({} as { admin?: boolean }).admin).toBeUndefined();
+});
