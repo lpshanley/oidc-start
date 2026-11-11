@@ -64,10 +64,16 @@ export async function sharedRefresh(coordinator: SessionRefreshCoordinator, {
 		session.user.issuer, session.clientId, session.sid, session.user.sub,
 		session.refreshGeneration ?? 0, session.refreshToken,
 	])).digest("hex");
+	// A coordinator answers reauth_required for a dispatched failure and keeps no
+	// error, so the caller that made the provider request holds on to its own.
+	let failure: { error: unknown } | undefined;
 	const result = await coordinator.run({ key, until, reuseMs: RECENT_REFRESH_MS }, async () => {
-		const tokens = await refresh();
+		let tokens: RefreshedTokens;
+		try { tokens = await refresh(); }
+		catch (error) { failure = { error }; throw error; }
 		return sealValue({ key, tokens, useBefore: Date.now() + RECENT_REFRESH_MS }, password, RECENT_REFRESH_MS / 1000);
 	});
+	if (result.status === "reauth_required") return { status: "reauth_required" as const, ...(failure ? { failure } : {}) };
 	if (result.status !== "ready") return result;
 	try {
 		const decoded = refreshResult.parse(await unsealValue(result.sealedResult, password, RECENT_REFRESH_MS / 1000));
