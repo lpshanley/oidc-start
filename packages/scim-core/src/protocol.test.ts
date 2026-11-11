@@ -322,3 +322,9 @@ test("a complex value merges, and unknown sub-attributes are never stored", () =
 	const cleared = patchUser(merged, { Operations: [{ op: "replace", path: `${ENTERPRISE}:manager`, value: null }] });
 	expect(cleared.attributes).toEqual({ phoneNumbers: [{ type: "work", value: "1" }] });
 });
+
+test("a count that is not a number falls back to the default", () => {
+	expect(paging(new URLSearchParams("count=abc")).limit).toBe(100);
+	expect(paging(new URLSearchParams("count=0")).limit).toBe(0);
+	expect(paging(new URLSearchParams("count=-5")).limit).toBe(0);
+});

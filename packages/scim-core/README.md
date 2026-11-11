@@ -11,7 +11,7 @@ This is an early release. It covers Users, Groups and discovery. It was extracte
 | Supported | Not supported yet |
 | --- | --- |
 | `/Users` and `/Groups`: create, read, list, PUT, PATCH, DELETE | Bulk operations and `/Me`, which answer 501 |
-| `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | Sorting, ETags and `POST /.search` |
+| `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | Sorting, ETags and `POST /.search`, which answers 405 |
 | Bearer tokens, resolved to a connection per request | Filters beyond `eq` clauses joined by `and` |
 | The core User and Group schemas, except `password` and `groups`, plus the enterprise extension | Custom schema extensions. Unknown attributes are accepted and not stored |
 | `attributes` and `excludedAttributes` on every resource response | Groups as group members |
@@ -75,7 +75,9 @@ Providers authenticate with a bearer token, so exempt this path from any browser
 - **Omitted fields on PUT:** a missing `active` or `externalId` keeps its current value, so a sparse update can't reactivate someone or break a link.
 - **`externalId` is fixed once set:** changing it answers `400 mutability`, which is stricter than RFC 7643. A deactivation still goes through and keeps the stored value, and the change carries `externalIdConflict`.
 - **Storage failures answer 503, never 404:** a 404 would tell the provider the user is gone.
-- **Unknown attributes are accepted and dropped:** refusing one would fail the whole request, which might also be a deactivation. `/Schemas` lists what is kept.
+- **Unknown attributes are accepted and dropped:** refusing one would fail the whole request, which might also be a deactivation. This includes unknown sub-attributes inside a list entry or `manager`. `/Schemas` lists what is kept.
+- **`null` means unassigned:** on POST and PUT, a null value is treated as omitted. A null `userName` is still refused.
+- **No `meta.version`:** ETags aren't supported, so responses don't claim a version. Your store still tracks one for your own use.
 - **A typed value is created when missing:** a `replace` of `emails[type eq "work"].value` adds the address if there is none, where RFC 7644 asks for `noTarget`. Other unmatched value paths do answer `noTarget`.
 - **PATCH paths are checked:** a malformed path answers `invalidPath`, and a path naming `id`, `meta`, `groups` or `schemas` answers `mutability`. A no-path PATCH ignores those keys, because Okta sends the group's `id` when renaming it.
 - **A value filter beyond `type` or `value` is dropped:** a path such as `emails[type eq "work" and primary eq true].value` is valid, not applied, and answers 200 like an unknown attribute.

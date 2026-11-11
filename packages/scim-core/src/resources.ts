@@ -13,13 +13,12 @@ export const listResponse = (resources: unknown[], total: number, startIndex: nu
 
 const meta = (
 	resourceType: string,
-	r: { createdAt: number; updatedAt: number; version: number },
+	r: { createdAt: number; updatedAt: number },
 	location: string,
 ) => ({
 	resourceType,
 	created: new Date(r.createdAt).toISOString(),
 	lastModified: new Date(r.updatedAt).toISOString(),
-	version: `W/"${r.version}"`,
 	location,
 });
 
@@ -61,6 +60,9 @@ function selector(name: string) {
 		if (lower.startsWith(prefix)) return lower.slice(prefix.length).split(".");
 	}
 	if (!lower.startsWith("urn:")) return lower.split(".");
+	const extension = ENTERPRISE.toLowerCase();
+	if (lower === extension) return [extension];
+	if (lower.startsWith(`${extension}:`)) return [extension, ...lower.slice(extension.length + 1).split(".")];
 	const split = lower.lastIndexOf(":");
 	return [lower.slice(0, split), ...lower.slice(split + 1).split(".")];
 }
@@ -118,7 +120,8 @@ type Attribute = {
 	description?: string;
 	multiValued?: boolean;
 	required?: boolean;
-	mutability?: "readWrite" | "readOnly";
+	caseExact?: boolean;
+	mutability?: "readWrite" | "readOnly" | "immutable";
 	uniqueness?: "none" | "server";
 	referenceTypes?: string[];
 	subAttributes?: Attribute[];
@@ -193,8 +196,8 @@ const SCHEMAS = [
 				type: "complex",
 				multiValued: true,
 				subAttributes: [
-					text("value"),
-					{ name: "$ref", type: "reference", referenceTypes: ["User"] },
+					{ name: "value", type: "string", mutability: "immutable" },
+					{ name: "$ref", type: "reference", referenceTypes: ["User"], caseExact: true, mutability: "immutable" },
 					{ name: "display", type: "string", mutability: "readOnly" },
 				],
 			},

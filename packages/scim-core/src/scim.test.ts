@@ -97,7 +97,7 @@ test("responses carry the resource, its location and paging", async () => {
 		displayName: "Ay",
 		name: { givenName: "A" },
 		active: true,
-		meta: { resourceType: "User", version: 'W/"1"' },
+		meta: { resourceType: "User" },
 	});
 	await scim.forConnection("acme").users.create({ userName: "b@x.test" });
 	const page = await get(scim, "/Users?startIndex=2&count=1");
@@ -222,7 +222,7 @@ test("a PATCH that changes nothing leaves the resource and its history alone", a
 	changes.length = 0;
 
 	const user = await patch(`/Users/${alice.id}`, { op: "replace", path: "userName", value: "alice@x.test" });
-	expect(user.body.meta.version).toBe((await idp.getUser(alice.id)).body.meta.version);
+	expect(user.body.meta.lastModified).toBe(user.body.meta.created);
 	const before = await idp.getGroup(group.id);
 	const same = await patch(
 		`/Groups/${group.id}`,
@@ -316,6 +316,40 @@ test("discovery describes every attribute the package keeps", async () => {
 	for (const schema of body.Resources)
 		for (const attribute of schema.attributes) expect(attribute.description, attribute.name).toEqual(expect.any(String));
 	expect((await get(scim, "/ResourceTypes/User")).body.schemaExtensions).toEqual([{ schema: ent, required: false }]);
+});
+
+test("a resource's location matches its headers, and no version is claimed without ETags", async () => {
+	const { scim } = setup();
+	const idp = createTestProvider(scim, { dialect: "okta" });
+	const created = await idp.send("POST", "/Users", { userName: "alice@x.test" });
+	const { location } = created.body.meta;
+	expect(created.headers.get("location")).toBe(location);
+	expect(created.headers.get("content-location")).toBe(location);
+	const read = await get(scim, `/Users/${created.body.id}?attributes=userName`);
+	expect(read.headers.get("content-location")).toBe(location);
+	expect(read.headers.get("etag")).toBeNull();
+	expect(created.body.meta.version).toBeUndefined();
+	expect((await get(scim, "/Users")).headers.get("content-location")).toBeNull();
+});
+
+test("names may carry their schema URN in filters, paths and attribute lists", async () => {
+	const { scim } = setup();
+	const ent = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
+	const idp = createTestProvider(scim, { dialect: "okta" });
+	const alice = (await idp.send("POST", "/Users", { userName: "alice@x.test", [ent]: { department: "Eng", division: "D" } })).body;
+	const group = await idp.createGroup("ops");
+	const q = encodeURIComponent;
+	expect((await get(scim, `/Users?filter=${q(`${USER}:userName eq "alice@x.test"`)}`)).body.totalResults).toBe(1);
+	expect((await get(scim, `/Groups?filter=${q(`${GROUP.toUpperCase()}:displayName eq "ops"`)}`)).body.totalResults).toBe(1);
+	expect((await get(scim, `/Users/${alice.id}?attributes=${q(ent)}`)).body[ent]).toEqual({ department: "Eng", division: "D" });
+	expect((await get(scim, `/Users/${alice.id}?excludedAttributes=${q(`${ent}:division`)}`)).body[ent]).toEqual({ department: "Eng" });
+	const renamed = await idp.send("PATCH", `/Groups/${group.id}`, {
+		schemas: [PATCH],
+		Operations: [{ op: "replace", path: `${GROUP}:displayName`, value: "platform" }],
+	});
+	expect(renamed.body.displayName).toBe("platform");
+	const removed = await idp.send("PATCH", `/Groups/${group.id}`, { schemas: [PATCH], Operations: [{ op: "remove", path: "displayName" }] });
+	expect(removed.body).toMatchObject({ status: "400", scimType: "mutability" });
 });
 
 test("group PUT keeps an externalId it omits, and replaces members", async () => {

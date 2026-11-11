@@ -333,12 +333,13 @@ function operations(body: unknown): Op[] {
 	return ops;
 }
 const opName = (o: Op) => String(o.op ?? "").toLowerCase();
-/** A path may carry the schema it belongs to (RFC 7644 §3.10). */
-const attributePath = (path: unknown) => {
-	const p = String(path ?? "").toLowerCase();
-	const prefix = `${USER.toLowerCase()}:`;
-	return p.startsWith(prefix) ? p.slice(prefix.length) : p;
-};
+/** A name without the core schema URN it may carry (RFC 7644 §3.10). */
+function unprefixed(name: string) {
+	for (const urn of [USER, GROUP])
+		if (name.toLowerCase().startsWith(`${urn.toLowerCase()}:`)) return name.slice(urn.length + 1);
+	return name;
+}
+const attributePath = (path: unknown) => unprefixed(String(path ?? "")).toLowerCase();
 
 /**
  * Applies a PATCH to a user, in order. Attributes outside the core schema and
@@ -409,9 +410,10 @@ export function patchGroup(body: unknown): ScimGroupChange[] {
 	const patch: ScimGroupChange[] = [];
 	for (const o of operations(body)) {
 		const op = opName(o);
-		const path = String(o.path ?? "");
+		const path = unprefixed(String(o.path ?? ""));
 		const filtered = /^members\[value eq "([^"]+)"\]$/i.exec(path);
 		if (op === "remove" && !path) throw noTarget();
+		if (op === "remove" && /^displayName$/i.test(path)) throw new ScimError(400, "mutability", "Cannot remove displayName");
 		if (op === "remove" && /^externalId$/i.test(path)) patch.push({ kind: "externalId", externalId: null });
 		else if ((op === "replace" || op === "add") && /^externalId$/i.test(path))
 			patch.push({ kind: "externalId", externalId: read(externalId, o.value) });
@@ -453,7 +455,7 @@ export function parseFilter<A extends string>(filter: string | null, allowed: re
 		result[key] = value;
 	};
 	for (const clause of filter.split(/\s+and\s+(?=(?:[^"]*"[^"]*")*[^"]*$)/i)) {
-		const match = CLAUSE.exec(clause);
+		const match = CLAUSE.exec(unprefixed(clause.trimStart()));
 		if (!match) throw unsupported();
 		const [, attribute, emailType, value] = match;
 		const key = emailType !== undefined || attribute.toLowerCase() === "emails.value" ? "email" : allowed.find((a) => a.toLowerCase() === attribute.toLowerCase());
@@ -466,6 +468,7 @@ export function parseFilter<A extends string>(filter: string | null, allowed: re
 
 export function paging(params: URLSearchParams) {
 	const start = Math.max(1, Number.parseInt(params.get("startIndex") ?? "1", 10) || 1);
-	const count = Math.min(MAX_RESULTS, Math.max(0, Number.parseInt(params.get("count") ?? "100", 10) || 0));
+	const asked = Number.parseInt(params.get("count") ?? "", 10);
+	const count = Number.isNaN(asked) ? 100 : Math.min(MAX_RESULTS, Math.max(0, asked));
 	return { offset: start - 1, limit: count, startIndex: start };
 }

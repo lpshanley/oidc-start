@@ -126,6 +126,12 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 		if (resource === "Schemas" && method === "GET") return discovery(schemas(base), id);
 		const { users, groups } = forConnection(connection, method);
 		const view = <T,>(resource: T) => project(resource, url.searchParams);
+		/** One resource, with the headers its `meta.location` must match (RFC 7643 §3.1). */
+		const one = <T extends { meta: { location: string } }>(resource: T, status = 200) =>
+			json(view(resource), status, {
+				"content-location": resource.meta.location,
+				...(status === 201 ? { location: resource.meta.location } : {}),
+			});
 		if (resource === "Users") {
 			if (!id && method === "GET") {
 				const page = paging(url.searchParams);
@@ -134,12 +140,11 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 				return json(listResponse(result.items.map((u) => view(toUser(u, base))), result.total, page.startIndex));
 			}
 			if (!id && method === "POST") {
-				const user = toUser(await users.create(await body(request)), base);
-				return json(view(user), 201, { location: user.meta.location });
+				return one(toUser(await users.create(await body(request)), base), 201);
 			}
-			if (id && method === "GET") return json(view(toUser(await users.get(id), base)));
-			if (id && method === "PUT") return json(view(toUser(await users.replace(id, await body(request)), base)));
-			if (id && method === "PATCH") return json(view(toUser(await users.patch(id, await body(request)), base)));
+			if (id && method === "GET") return one(toUser(await users.get(id), base));
+			if (id && method === "PUT") return one(toUser(await users.replace(id, await body(request)), base));
+			if (id && method === "PATCH") return one(toUser(await users.patch(id, await body(request)), base));
 			if (id && method === "DELETE") {
 				await users.delete(id);
 				return new Response(null, { status: 204 });
@@ -153,12 +158,11 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 				return json(listResponse(result.items.map((g) => view(toGroup(g, base))), result.total, page.startIndex));
 			}
 			if (!id && method === "POST") {
-				const group = toGroup(await groups.create(parseGroup(await body(request))), base);
-				return json(view(group), 201, { location: group.meta.location });
+				return one(toGroup(await groups.create(parseGroup(await body(request))), base), 201);
 			}
-			if (id && method === "GET") return json(view(toGroup(await groups.get(id), base)));
-			if (id && method === "PUT") return json(view(toGroup(await groups.replace(id, parseGroup(await body(request))), base)));
-			if (id && method === "PATCH") return json(view(toGroup(await groups.patch(id, patchGroup(await body(request))), base)));
+			if (id && method === "GET") return one(toGroup(await groups.get(id), base));
+			if (id && method === "PUT") return one(toGroup(await groups.replace(id, parseGroup(await body(request))), base));
+			if (id && method === "PATCH") return one(toGroup(await groups.patch(id, patchGroup(await body(request))), base));
 			if (id && method === "DELETE") {
 				await groups.delete(id);
 				return new Response(null, { status: 204 });
