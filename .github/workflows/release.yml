@@ -2,7 +2,7 @@ name: Release to npm
 on:
   workflow_dispatch:
   push:
-    tags: ['v[0-9]*']
+    tags: ['v[0-9]*', 'scim-core-v[0-9]*']
 
 permissions:
   contents: read
@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      packages: ${{ steps.pack.outputs.packages }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -23,23 +24,36 @@ jobs:
         if: github.event_name == 'push'
         run: |
           if [[ "$GITHUB_REF_PROTECTED" != true ]]; then
-            echo "::error::Protect v* release tags with a GitHub tag ruleset."
+            echo "::error::Protect v* and scim-core-v* release tags with a GitHub tag ruleset."
             exit 1
           fi
           git merge-base --is-ancestor HEAD refs/remotes/origin/main
       - uses: ./.github/actions/verify
-      - name: Pack and check both public packages
+      - name: Pack and check the public packages
+        id: pack
         run: |
           out="$RUNNER_TEMP/npm-tarballs"
           mkdir -p "$out"
-          pnpm --filter @lpshanley/oidc-start-core pack --pack-destination "$out"
-          pnpm --filter @lpshanley/oidc-start-react pack --pack-destination "$out"
-          tag="$GITHUB_REF_NAME"
-          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
-            tag="v$(node -p "require('./packages/core/package.json').version")"
+          version() { node -p "require('./packages/$1/package.json').version"; }
+          # A vX.Y.Z tag releases core and react. A scim-core-vX.Y.Z tag releases scim-core.
+          # A manual run checks both sets at their current versions.
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_REF_NAME" == v* ]]; then
+            pnpm --filter @lpshanley/oidc-start-core pack --pack-destination "$out"
+            pnpm --filter @lpshanley/oidc-start-react pack --pack-destination "$out"
+            tag="$GITHUB_REF_NAME"
+            [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && tag="v$(version core)"
+            node scripts/npm-release.mjs check "$tag" "$out"
+            echo 'packages=["core","react"]' >> "$GITHUB_OUTPUT"
           fi
-          node scripts/npm-release.mjs check "$tag" "$out"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_REF_NAME" == scim-core-v* ]]; then
+            pnpm --filter @lpshanley/scim-core pack --pack-destination "$out"
+            tag="$GITHUB_REF_NAME"
+            [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && tag="scim-core-v$(version scim-core)"
+            node scripts/npm-release.mjs check "$tag" "$out"
+            [[ "$GITHUB_EVENT_NAME" == push ]] && echo 'packages=["scim-core"]' >> "$GITHUB_OUTPUT"
+          fi
       - name: Test the packed libraries in Chromium
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref_name, 'v')
         run: |
           pnpm --filter oidc-start-example exec playwright install --with-deps chromium
           bash scripts/check-packed-browser.sh "$RUNNER_TEMP/npm-tarballs"
@@ -57,7 +71,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [core, react]
+        package: ${{ fromJSON(needs.prepare.outputs.packages) }}
     runs-on: ubuntu-latest
     environment: npm
     concurrency:
