@@ -48,8 +48,11 @@ export async function requireRecentAuth(options: GuardOptions & { maxAge: number
 	return { user };
 }
 
-/** An authorization URL; also queues the flow's verifier cookie. */
-export const getSignInUrl = createServerFn({ method: "GET" })
+/**
+ * An authorization URL; also starts a flow and queues its verifier cookie.
+ * That is a state change, so it is a POST and the CSRF middleware covers it.
+ */
+export const getSignInUrl = createServerFn({ method: "POST" })
 	.validator(signInOptionsSchema.optional())
 	.handler(async ({ data }) => {
 		const { getSignInUrlBody } = await import("./functions.server.js");

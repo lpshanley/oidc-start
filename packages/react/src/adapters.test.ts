@@ -68,6 +68,18 @@ beforeEach(() => {
 	start.context = undefined;
 });
 
+describe("getSignInUrlBody", () => {
+	test("queues the verifier cookie and forbids caching the response", async () => {
+		const appended = context();
+		core.signIn.mockResolvedValueOnce({ url: "https://idp.test/authorize", setCookies: ["v=1"] });
+
+		expect(await functions.getSignInUrlBody({ returnPathname: "/account" })).toBe("https://idp.test/authorize");
+
+		expect(appended).toEqual(["v=1"]);
+		expect(start.setResponseHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
+	});
+});
+
 describe("oidcMiddleware", () => {
 	test("preserves a router redirect while appending refreshed and queued cookies", async () => {
 		oidcMiddleware({ core: () => core as unknown as OidcContext["core"] });
@@ -105,27 +117,62 @@ describe("oidcMiddleware", () => {
 		]);
 	});
 
-	test("uses a core composed by the app", async () => {
+	test("uses a core composed by the app, built once for every request", async () => {
 		createOidcCore.mockClear();
 		const composed = { ...core };
-		oidcMiddleware({
-			core: (context) =>
-				(context as { composed: OidcContext["core"] }).composed,
-		});
 		composed.resolve = vi.fn().mockResolvedValue({
 			cookies: new Map(),
 			session: null,
 			setCookies: [],
 		});
+		const compose = vi.fn(() => composed as unknown as OidcContext["core"]);
+		oidcMiddleware({ core: compose });
+		const run = () =>
+			start.server?.({
+				request: new Request("https://sage.test/"),
+				next: async () => ({ response: new Response("ok") }),
+			});
 
-		await start.server?.({
-			request: new Request("https://sage.test/"),
-			context: { composed },
-			next: async () => ({ response: new Response("ok") }),
-		});
+		await run();
+		await run();
 
-		expect(composed.resolve).toHaveBeenCalledOnce();
+		expect(compose).toHaveBeenCalledOnce();
+		expect(compose).toHaveBeenCalledWith();
+		expect(composed.resolve).toHaveBeenCalledTimes(2);
 		expect(createOidcCore).not.toHaveBeenCalled();
+	});
+
+	test("keeps two tenants' cores apart, each in its own middleware", async () => {
+		const tenant = (name: string) => {
+			const tenantCore = {
+				...core,
+				resolve: vi.fn().mockResolvedValue({
+					cookies: new Map(),
+					session: { user: { ...alice, sub: name } },
+					status: "authenticated",
+					setCookies: [],
+				}),
+			};
+			oidcMiddleware({ core: () => tenantCore as unknown as OidcContext["core"] });
+			return { core: tenantCore, run: start.server! };
+		};
+		const a = tenant("tenant-a");
+		const b = tenant("tenant-b");
+		const seen: string[] = [];
+		const next = async (options: unknown) => {
+			const { oidc } = (options as { context: { oidc: OidcContext } }).context;
+			seen.push(oidc.auth().user?.sub ?? "");
+			return { response: new Response("ok") };
+		};
+		const request = new Request("https://sage.test/");
+
+		await a.run({ request, next });
+		await b.run({ request, next });
+		await a.run({ request, next });
+
+		expect(seen).toEqual(["tenant-a", "tenant-b", "tenant-a"]);
+		expect(a.core.resolve).toHaveBeenCalledTimes(2);
+		expect(b.core.resolve).toHaveBeenCalledOnce();
 	});
 
 	test("a successful account switch supersedes all writes for the old session", async () => {

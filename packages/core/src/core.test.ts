@@ -363,6 +363,66 @@ describe("assertConfigured", () => {
 	});
 });
 
+describe("origin configuration", () => {
+	const configured = (extra: Record<string, string>) =>
+		createOidcCore({ allowSession, registry, environment: () => ({ ...env, ...extra }) });
+
+	test("rejects a malformed OIDC_REDIRECT_URI instead of ignoring it", () => {
+		expect(() => configured({ OIDC_REDIRECT_URI: "not a url" }).assertConfigured()).toThrow(
+			/OIDC_REDIRECT_URI must be a valid URL/,
+		);
+	});
+
+	test("requires APP_ORIGIN in production", () => {
+		expect(() => configured({ APP_ORIGIN: "", NODE_ENV: "production" }).assertConfigured()).toThrow(
+			/APP_ORIGIN is required in production/,
+		);
+	});
+
+	test("refuses HTTP origins in production unless explicitly allowed", () => {
+		const http = { APP_ORIGIN: "http://sage.test", NODE_ENV: "production" };
+		expect(() => configured(http).assertConfigured()).toThrow(/APP_ORIGIN must use https in production/);
+		expect(() =>
+			configured({ ...http, OIDC_REDIRECT_URI: "http://sage.test/callback" }).assertConfigured(),
+		).toThrow(/OIDC_REDIRECT_URI must use https in production/);
+	});
+
+	test("the insecure override permits loopback hosts only", () => {
+		const local = { NODE_ENV: "production", OIDC_ALLOW_INSECURE_ORIGIN: "true" };
+		for (const host of ["localhost:3000", "127.0.0.1:3000", "[::1]:3000"]) {
+			expect(() =>
+				configured({ ...local, APP_ORIGIN: `http://${host}`, OIDC_REDIRECT_URI: `http://${host}/callback` }).assertConfigured(),
+			).not.toThrow();
+		}
+		for (const scheme of ["ftp", "ws"]) {
+			expect(() => configured({ ...local, APP_ORIGIN: `${scheme}://localhost:3000` }).assertConfigured()).toThrow(
+				/APP_ORIGIN must use https in production/,
+			);
+			expect(() =>
+				configured({ ...local, APP_ORIGIN: "http://localhost:3000", OIDC_REDIRECT_URI: `${scheme}://localhost/callback` }).assertConfigured(),
+			).toThrow(/OIDC_REDIRECT_URI must use https in production/);
+		}
+		for (const host of ["sage.test", "10.0.0.5", "localhost.evil.test", "127.0.0.1.evil.test"]) {
+			expect(() => configured({ ...local, APP_ORIGIN: `http://${host}` }).assertConfigured()).toThrow(
+				/APP_ORIGIN must use https in production/,
+			);
+			expect(() =>
+				configured({ ...local, APP_ORIGIN: "http://localhost:3000", OIDC_REDIRECT_URI: `http://${host}/callback` }).assertConfigured(),
+			).toThrow(/OIDC_REDIRECT_URI must use https in production/);
+		}
+	});
+
+	test("still allows an HTTP origin outside production", () => {
+		expect(() => configured({ APP_ORIGIN: "http://localhost:5173" }).assertConfigured()).not.toThrow();
+	});
+
+	test("fails a sign-in at request time on a malformed OIDC_REDIRECT_URI", async () => {
+		await expect(
+			configured({ OIDC_REDIRECT_URI: "nope" }).signIn(request("/"), new Map()),
+		).rejects.toThrow();
+	});
+});
+
 describe("withinDeadline", () => {
 	test("passes work through without a deadline", async () => {
 		await expect(withinDeadline(() => Promise.resolve(1))).resolves.toBe(1);
@@ -437,6 +497,24 @@ test("still signs out when the provider cannot revoke the refresh token", async 
 	expect(onError).toHaveBeenCalledWith(
 		expect.objectContaining({ operation: "token-revocation" }),
 	);
+});
+
+test("back-channel logout stops reading when the request aborts, with no OIDC context", async () => {
+	const auth = createOidcCore({ allowSession, registry, environment: () => env, onError: vi.fn() });
+	const controller = new AbortController();
+	const body = new ReadableStream<Uint8Array>({
+		start: (c) => c.enqueue(new TextEncoder().encode("logout_token=")),
+	});
+	const request = new Request("https://internal:3000/auth/backchannel-logout", {
+		method: "POST",
+		headers: { "content-type": "application/x-www-form-urlencoded" },
+		body,
+		signal: controller.signal,
+		duplex: "half",
+	} as RequestInit);
+	setTimeout(() => controller.abort(), 10);
+
+	expect(await auth.backchannelLogout(request)).toEqual({ status: 400 });
 });
 
 test("ends the sessions a verified back-channel logout token names", async () => {

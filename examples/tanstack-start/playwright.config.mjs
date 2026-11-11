@@ -25,7 +25,7 @@ export default defineConfig({
 		...apps.map(({ origin, port, args, clientId, secret }) => ({
 			command: `node node_modules/vite/bin/vite.js ${args} --host 127.0.0.1 --port ${port} --strictPort`,
 			url: origin,
-			env: { ...client, OIDC_CLIENT_ID: clientId, OIDC_CLIENT_SECRET: secret, APP_ORIGIN: origin, SESSION_SECRET: randomBytes(32).toString("hex") },
+			env: { ...client, OIDC_CLIENT_ID: clientId, OIDC_CLIENT_SECRET: secret, APP_ORIGIN: origin, OIDC_ALLOW_INSECURE_ORIGIN: "true", SESSION_SECRET: randomBytes(32).toString("hex") },
 		})),
 	],
 });

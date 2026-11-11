@@ -51,6 +51,8 @@ export const startInstance = createStart(() => ({
 }))
 ```
 
+`oidcMiddleware` serves one core. The `core` function takes no arguments and runs once, on the first request; its result is reused for every request after. It cannot pick a configuration per request.
+
 ## 3. Add the callback route
 
 Create `src/routes/callback.ts`. The handler checks the provider response, establishes the session, and redirects to the local path chosen at sign-in.
