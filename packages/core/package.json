@@ -1,6 +1,6 @@
 {
   "name": "@lpshanley/oidc-start-core",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -19,6 +19,10 @@
     "./models": {
       "types": "./dist/models.d.ts",
       "import": "./dist/models.js"
+    },
+    "./helpers": {
+      "types": "./dist/helpers.d.ts",
+      "import": "./dist/helpers.js"
     },
     "./provider": {
       "types": "./dist/provider.d.ts",

@@ -30,6 +30,8 @@ export type SessionResolution = { setCookies: string[] } & (
 );
 export type SessionReport = (error: unknown, operation: "refresh" | "registry-read" | "session-policy", reason: SessionReason) => void;
 
+const isGrantRefused = (error: unknown) => (error as { error?: unknown } | null)?.error === "invalid_grant";
+
 export function createSessionManager({
 	cookieName: name, cookieOptions, maxAgeSeconds, idleSeconds, password, provider,
 	registry, scope, refreshCoordinator = createMemoryRefreshCoordinator(), allowSession = () => true,
@@ -108,7 +110,12 @@ export function createSessionManager({
 		}
 		if (fresh.status === "busy") return { status: "unavailable", reason: "refresh_busy", session: null, setCookies: [] };
 		// A stale request must not erase a newer cookie written by a peer.
-		if (fresh.status === "reauth_required") return absent("reauth_required");
+		if (fresh.status === "reauth_required") {
+			// The provider ending the grant is an ordinary expiry. Anything else, such
+			// as a 500 or a timeout after dispatch, signed the user out and is reported.
+			if ("failure" in fresh && fresh.failure && !isGrantRefused(fresh.failure.error)) report(fresh.failure.error, "refresh", "reauth_required");
+			return absent("reauth_required");
+		}
 		const { roles, email, ...tokens } = fresh.tokens;
 		const refreshed: Session = {
 			...session, ...tokens, refreshGeneration: (session.refreshGeneration ?? 0) + 1,

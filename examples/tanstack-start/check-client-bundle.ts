@@ -9,17 +9,17 @@ function modulePath(specifier: string) {
 const functions = modulePath("@lpshanley/oidc-start-react/functions");
 const serverEntry = modulePath("@lpshanley/oidc-start-react/server");
 const serverContext = dirname(functions) + "/context.js";
-const providerDependency = /(?:^|\/node_modules\/)(?:openid-client|oauth4webapi|jose|iron-webcrypto)(?:\/|$)/;
+const serverDependency = /(?:^|\/node_modules\/)(?:openid-client|oauth4webapi|jose|iron-webcrypto|zod)(?:\/|$)/;
 
-function isServerOnly(id: string, models: string) {
-	return (id.startsWith(dirname(models) + "/") && id !== models)
+function isServerOnly(id: string, helpers: string) {
+	return (id.startsWith(dirname(helpers) + "/") && id !== helpers)
 		|| id === serverEntry
 		|| id === serverContext
 		|| /\.server\.[cm]?[jt]sx?$/.test(id)
-		|| providerDependency.test(id)
+		|| serverDependency.test(id)
 		|| id.startsWith("node:")
 		|| (id === "@lpshanley/oidc-start-core")
-		|| (id.startsWith("@lpshanley/oidc-start-core/") && id !== "@lpshanley/oidc-start-core/models")
+		|| (id.startsWith("@lpshanley/oidc-start-core/") && id !== "@lpshanley/oidc-start-core/helpers")
 		|| id === "@lpshanley/oidc-start-react/server";
 }
 
@@ -30,8 +30,8 @@ export function checkClientBundle(): Plugin {
 		applyToEnvironment: (environment) => environment.name === "client",
 		async generateBundle(_, bundle) {
 			// Resolve core from its direct dependent in workspace and packed installs.
-			const models = await this.resolve("@lpshanley/oidc-start-core/models", functions);
-			if (!models || models.external) this.error("Could not resolve the adapter's browser-safe core models.");
+			const helpers = await this.resolve("@lpshanley/oidc-start-core/helpers", functions);
+			if (!helpers || helpers.external) this.error("Could not resolve the adapter's browser-safe core helpers.");
 			let includesAuthFunctions = false;
 			for (const chunk of Object.values(bundle)) {
 				if (chunk.type !== "chunk") continue;
@@ -41,7 +41,7 @@ export function checkClientBundle(): Plugin {
 					.map(([id]) => id);
 				for (const id of [...rendered, ...chunk.imports, ...chunk.dynamicImports]) {
 					const path = normalizePath(id.split("?")[0]);
-					if (isServerOnly(path, normalizePath(models.id))) this.error(`Server-only code in ${chunk.fileName}: ${id}`);
+					if (isServerOnly(path, normalizePath(helpers.id))) this.error(`Server-only code in ${chunk.fileName}: ${id}`);
 					if (path === functions) includesAuthFunctions = true;
 				}
 			}

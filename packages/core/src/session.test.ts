@@ -167,6 +167,21 @@ test("only a proven pre-dispatch failure permits retry of the same refresh token
 	expect(b.refresh).toHaveBeenCalledOnce();
 });
 
+test("a refresh that fails after dispatch is reported once, and a refused grant is not", async () => {
+	const failed = setup();
+	const error = new Error("HTTP 500 from the token endpoint");
+	failed.refresh.mockRejectedValueOnce(error);
+	const report = vi.fn();
+	const cookies = await failed.jar({ ...fresh, expiresAt: 1010 });
+	for (let i = 0; i < 2; i++) expect((await failed.manager.resolve(cookies, report)).reason).toBe("reauth_required");
+	expect(report.mock.calls).toEqual([[error, "refresh", "reauth_required"]]);
+	const refused = setup();
+	refused.refresh.mockRejectedValueOnce(Object.assign(new Error("expired"), { error: "invalid_grant" }));
+	const quiet = vi.fn();
+	expect((await refused.manager.resolve(await refused.jar({ ...fresh, expiresAt: 1010 }), quiet)).reason).toBe("reauth_required");
+	expect(quiet).not.toHaveBeenCalled();
+});
+
 test.each(["busy", "reauth_required"] as const)("coordination distinguishes %s without deleting a peer's cookie", async status => {
 	const { manager, jar, refresh } = setup({ coordinator: { run: async () => ({ status }) } });
 	expect(await manager.resolve(await jar({ ...fresh, expiresAt: 1010 }))).toMatchObject({ status: status === "busy" ? "unavailable" : "anonymous", setCookies: [] });

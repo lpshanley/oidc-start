@@ -1,5 +1,9 @@
 # Authentik interoperability
 
+## Re-check on 2026-11-11
+
+The same opt-in check passed again against Authentik 2026.8.5 and PostgreSQL 16 on the `feat/scim-core` branch, which adds the refresh failure reporting to the 0.5.0 core. A disposable instance was used and removed afterwards. SCIM provisioning to the `@lpshanley/scim-core` package was tested against the same version: see the authentik section of [its README](../packages/scim-core/README.md#authentik).
+
 ## 0.5.0 session registry
 
 On November 4, 2026, the 0.5.0 candidate passed the opt-in check in
