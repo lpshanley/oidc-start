@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { createScim, type ScimChange, type ScimOptions, type ScimUser } from "./index.js";
+import { createScim, createScimAdapter, ScimConflictError, type ScimChange, type ScimOptions, type ScimProblem, type ScimUser } from "./index.js";
 import { createMemoryAdapter, replayTraffic, type ScimExchange } from "./testing.js";
 
 const recording = (name: string): ScimExchange[] =>
@@ -177,4 +177,54 @@ test.each(["mutable", "fixed"] as const)("Okta newer wizard traffic replays with
 		"group.patched",
 		"group.deleted",
 	]);
+});
+
+// Captured from the same Okta trial org (catalog SCIM 2.0 Test App) while the
+// harness made writes fail: creates answered 503 and 409, and a deactivation
+// answered 503. Okta did not retry any of them, and a failed deactivation
+// became a manual task for the admin, so the package must leave the user
+// exactly as it was and report the failure. The recording is replayed with the
+// same writes failing.
+test("Okta traffic with failing writes replays, reports each failure and applies nothing", async () => {
+	let fault: "unavailable" | "conflict" | undefined;
+	const storage = createMemoryAdapter<string>();
+	const adapter = createScimAdapter<string>({
+		read: (connection) => storage.read(connection),
+		async transaction(connection, fn) {
+			const mode = fault;
+			fault = undefined;
+			if (mode === "unavailable") throw new Error("injected storage failure");
+			if (mode === "conflict") throw new ScimConflictError("injected conflict");
+			return storage.transaction(connection, fn);
+		},
+	});
+	const problems: ScimProblem[] = [];
+	const changes: ScimChange[] = [];
+	const options: ScimOptions<string, ScimUser, undefined> = {
+		adapter,
+		authenticate: async () => "acme",
+		onChange: async (change) => void changes.push(change),
+		onProblem: (problem) => void problems.push(problem),
+	};
+	const scim = createScim(options);
+	const exchanges = recording("okta-failures-2026-11");
+	expect(exchanges.filter((e) => e.status >= 400).map((e) => `${e.method} ${e.status}`)).toEqual(["POST 503", "POST 409", "PATCH 503"]);
+	const mismatches = await replayTraffic(scim, exchanges, {
+		before: (exchange) => {
+			fault = exchange.status === 503 ? "unavailable" : exchange.status === 409 ? "conflict" : undefined;
+		},
+	});
+	expect(mismatches).toEqual([]);
+
+	// Every failure reached the host, and only the 409 is a refusal.
+	expect(problems.map(({ kind, method, status, scimType }) => ({ kind, method, status, scimType }))).toEqual([
+		{ kind: "failed", method: "POST", status: undefined, scimType: undefined },
+		{ kind: "refused", method: "POST", status: 409, scimType: "uniqueness" },
+		{ kind: "failed", method: "PATCH", status: undefined, scimType: undefined },
+	]);
+
+	// The failed deactivation left that user active, and the retried creates worked.
+	const users = await scim.forConnection("acme").users.list({}, 0, 100);
+	expect(users.items.map((u) => u.active).sort()).toEqual([false, true]);
+	expect(changes.map((c) => c.type)).toEqual(["user.created", "user.created", "user.deactivated"]);
 });
