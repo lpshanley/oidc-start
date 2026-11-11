@@ -24,8 +24,15 @@ const PERSONAL = new Set([
 	"postalCode",
 	"department",
 	"employeeNumber",
+	"region",
+	"country",
+	"organization",
+	"division",
+	"costCenter",
+	"profileUrl",
 ]);
-const CONTACT = new Set(["emails", "phoneNumbers", "ims", "photos"]);
+// A manager's value is often the manager's own userName, as Okta sends it.
+const CONTACT = new Set(["emails", "phoneNumbers", "ims", "photos", "manager"]);
 const SECRET = new Set(["password"]);
 
 /** Replaces personal values with stable placeholders, so that lookups still match creates. */

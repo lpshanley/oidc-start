@@ -36,9 +36,10 @@ test("a recording drops credentials and notices a changed status", async () => {
 		password: "hunter2",
 		emails: [{ value: "a@x.test" }],
 		phoneNumbers: [{ value: "555" }],
+		"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": { manager: { value: "boss@x.test", displayName: "The Boss" } },
 	});
 	await idp.send("GET", "/Users/missing");
-	expect(JSON.stringify(exchanges)).not.toMatch(/hunter2|super-secret-token|555|a@x/);
+	expect(JSON.stringify(exchanges)).not.toMatch(/hunter2|super-secret-token|555|a@x|boss@x|The Boss/);
 
 	const wrong = await replayTraffic(instance(), [{ ...exchanges[1], status: 200 }]);
 	expect(wrong.map((m) => m.status)).toEqual([404]);
