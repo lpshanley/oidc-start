@@ -41,16 +41,17 @@ jobs:
             pnpm --filter @lpshanley/oidc-start-core pack --pack-destination "$out"
             pnpm --filter @lpshanley/oidc-start-react pack --pack-destination "$out"
             tag="$GITHUB_REF_NAME"
-            [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && tag="v$(version core)"
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then tag="v$(version core)"; fi
             node scripts/npm-release.mjs check "$tag" "$out"
             echo 'packages=["core","react"]' >> "$GITHUB_OUTPUT"
           fi
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_REF_NAME" == scim-core-v* ]]; then
             pnpm --filter @lpshanley/scim-core pack --pack-destination "$out"
             tag="$GITHUB_REF_NAME"
-            [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && tag="scim-core-v$(version scim-core)"
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then tag="scim-core-v$(version scim-core)"; fi
             node scripts/npm-release.mjs check "$tag" "$out"
-            [[ "$GITHUB_EVENT_NAME" == push ]] && echo 'packages=["scim-core"]' >> "$GITHUB_OUTPUT"
+            # A `&&` here would end the step with status 1 on a manual run.
+            if [[ "$GITHUB_EVENT_NAME" == push ]]; then echo 'packages=["scim-core"]' >> "$GITHUB_OUTPUT"; fi
           fi
       - name: Test the packed libraries in Chromium
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref_name, 'v')
