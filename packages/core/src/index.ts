@@ -8,6 +8,7 @@ export {
 	type GrantResult,
 } from "./core.js";
 export { createMemoryRefreshCoordinator, type RefreshCoordinationResult, type SessionRefreshCoordinator } from "./refresh.js";
+export { readFormBody, type ReadFormBodyOptions } from "./body.js";
 export type { Session, SessionResolution, SessionReason } from "./session.js";
 export { createMemorySessionRegistry, type SessionRegistry, type SessionScope, type SessionKey, type SessionRecord, type ProviderLogout } from "./registry.js";
 export type { SignOutOptions } from "./models.js";
