@@ -118,13 +118,20 @@ type Mismatch = { exchange: ScimExchange; status: number };
 export async function replayTraffic(
 	scim: Handler,
 	exchanges: ScimExchange[],
-	options: { token?: string; origin?: string; basePath?: string } = {},
+	options: {
+		token?: string;
+		origin?: string;
+		basePath?: string;
+		/** Runs before each exchange is sent, for example to make the next write fail as it did when recorded. */
+		before?(exchange: ScimExchange): void | Promise<void>;
+	} = {},
 ): Promise<Mismatch[]> {
 	const { token = "test-token", origin = "https://app.test", basePath = "/scim/v2" } = options;
 	const ids = new Map<string, string>();
 	const mapped = (text: string) => [...ids].reduce((out, [from, to]) => out.replaceAll(from, to), text);
 	const mismatches: Mismatch[] = [];
 	for (const exchange of exchanges) {
+		await options.before?.(exchange);
 		const body = exchange.body === undefined ? undefined : mapped(JSON.stringify(exchange.body));
 		const response = await scim.handle(
 			new Request(origin + basePath + mapped(exchange.path), {
