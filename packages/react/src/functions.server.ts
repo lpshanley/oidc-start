@@ -24,6 +24,7 @@ export function getRecentAuthBody(maxAge: number): AuthSession {
 }
 
 export async function getSignInUrlBody(options?: SignInOptions) {
+	setResponseHeader("Cache-Control", "no-store");
 	const context = getOidcContext();
 	const { url, setCookies } = await context.core.signIn(
 		context.request,

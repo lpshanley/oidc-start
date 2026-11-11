@@ -68,6 +68,26 @@ beforeEach(() => {
 	start.context = undefined;
 });
 
+describe("getSignInUrlBody", () => {
+	test("queues the verifier cookie and forbids caching the response", async () => {
+		const appended = context();
+		core.signIn.mockResolvedValueOnce({ url: "https://idp.test/authorize", setCookies: ["v=1"] });
+
+		expect(await functions.getSignInUrlBody({ returnPathname: "/account" })).toBe("https://idp.test/authorize");
+
+		expect(appended).toEqual(["v=1"]);
+		expect(start.setResponseHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
+	});
+});
+
+describe("getSignInUrl", () => {
+	test("is a POST server function", async () => {
+		const { readFileSync } = await import("node:fs");
+		const source = readFileSync(new URL("./functions.ts", import.meta.url), "utf8");
+		expect(source).toMatch(/getSignInUrl = createServerFn\(\{ method: "POST" \}\)/);
+	});
+});
+
 describe("oidcMiddleware", () => {
 	test("preserves a router redirect while appending refreshed and queued cookies", async () => {
 		oidcMiddleware({ core: () => core as unknown as OidcContext["core"] });
