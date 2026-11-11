@@ -266,6 +266,9 @@ test("handle never rejects when onProblem throws or rejects", async () => {
 		async () => {
 			throw new Error("monitoring down");
 		},
+		// A thenable that is not a native Promise, as another realm's would be.
+		() => ({ then: (_: unknown, reject: (error: unknown) => void) => reject(new Error("monitoring down")) }) as never,
+		() => ({ then: () => { throw new Error("monitoring down"); } }) as never,
 	]) {
 		const { scim } = setup({ onProblem });
 		const idp = createTestProvider(scim, { dialect: "okta" });

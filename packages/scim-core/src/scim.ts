@@ -101,8 +101,8 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 	// write, into an error. Sync throws and async rejections are both dropped.
 	const report = (problem: ScimProblem) => {
 		try {
-			const result: unknown = options.onProblem?.(problem);
-			if (result instanceof Promise) result.catch(() => {});
+			// Promise.resolve adopts any thenable, from this realm or another.
+			void Promise.resolve(options.onProblem?.(problem)).catch(() => {});
 		} catch {
 			// Nothing safe to do: the reporter is the only channel for this.
 		}
