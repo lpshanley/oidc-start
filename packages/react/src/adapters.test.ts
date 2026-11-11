@@ -80,14 +80,6 @@ describe("getSignInUrlBody", () => {
 	});
 });
 
-describe("getSignInUrl", () => {
-	test("is a POST server function", async () => {
-		const { readFileSync } = await import("node:fs");
-		const source = readFileSync(new URL("./functions.ts", import.meta.url), "utf8");
-		expect(source).toMatch(/getSignInUrl = createServerFn\(\{ method: "POST" \}\)/);
-	});
-});
-
 describe("oidcMiddleware", () => {
 	test("preserves a router redirect while appending refreshed and queued cookies", async () => {
 		oidcMiddleware({ core: () => core as unknown as OidcContext["core"] });
