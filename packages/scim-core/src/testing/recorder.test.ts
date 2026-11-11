@@ -57,3 +57,41 @@ test("a recording scrubs attribute names whatever their case", async () => {
 	});
 	expect(JSON.stringify(exchanges)).not.toMatch(/hunter2|a@x|boss@x/);
 });
+
+test("a recording never reads the body of a request that fails authentication", async () => {
+	const exchanges: ScimExchange[] = [];
+	const options: ScimOptions<string, ScimUser, undefined> = {
+		adapter: createMemoryAdapter<string>(),
+		authenticate: async () => null,
+	};
+	const scim = recordTraffic(createScim(options), { onExchange: (e) => exchanges.push(e) });
+	let pulled = 0;
+	const body = new ReadableStream<Uint8Array>({
+		pull(controller) {
+			pulled += 1;
+			if (pulled > 4) controller.close();
+			else controller.enqueue(new Uint8Array(1024));
+		},
+	});
+	const response = await scim.handle(
+		new Request("https://app.test/scim/v2/Users", {
+			method: "POST",
+			headers: { "content-type": "application/scim+json" },
+			body,
+			duplex: "half",
+		} as RequestInit),
+	);
+	expect(response.status).toBe(401);
+	expect(pulled).toBeLessThanOrEqual(2);
+	expect(exchanges).toEqual([]);
+});
+
+test("a recording that fails does not change the answer", async () => {
+	const scim = recordTraffic(instance(), {
+		onExchange: () => {
+			throw new Error("disk full");
+		},
+	});
+	const idp = createTestProvider(scim, { dialect: "okta" });
+	expect((await idp.findUser("a@x.test")).totalResults).toBe(0);
+});
