@@ -289,3 +289,36 @@ test("a PATCH path must be well formed and writable", () => {
 	expect(patch({ op: "replace", path: null, value: { displayName: "A" } }).displayName).toBe("A");
 	expect(patchGroup({ Operations: [{ op: "replace", value: { id: "g", displayName: "ops" } }] })).toEqual([{ kind: "rename", displayName: "ops" }]);
 });
+
+test("null means unassigned on a full resource", () => {
+	const body = { userName: "bob", active: null, externalId: null, displayName: null, name: null, emails: null, title: null };
+	expect(parseUser(body)).toMatchObject({ active: true, externalId: null, name: null, emails: [], attributes: {} });
+	expect(replaceUser({ ...alice, active: false }, body)).toMatchObject({ active: false, externalId: "sub-1" });
+	expect(() => parseUser({ userName: null })).toThrow("userName");
+});
+
+test("making one value primary takes it from the others", () => {
+	const start = { ...alice, emails: [{ value: "w@x.test", type: "work" }, { value: "h@x.test", type: "home", primary: true }] };
+	const moved = patchUser(start, { Operations: [{ op: "replace", path: 'emails[type eq "work"].primary', value: "True" }] });
+	expect(moved.emails.map((e) => [e.type, e.primary])).toEqual([["work", true], ["home", false]]);
+	const whole = patchUser(start, { Operations: [{ op: "replace", path: 'emails[type eq "work"]', value: { value: "n@x.test", primary: true } }] });
+	expect(whole.emails.map((e) => [e.value, e.primary])).toEqual([["n@x.test", true], ["h@x.test", false]]);
+});
+
+test("a complex value merges, and unknown sub-attributes are never stored", () => {
+	const user = parseUser({
+		userName: "bob",
+		phoneNumbers: [{ type: "work", value: "1", junk: "x", nested: { a: 1 } }, { junk: "only" }],
+		emails: [{ value: "b@x.test", junk: "x" }],
+		[ENTERPRISE]: { manager: { value: "m-1", $ref: "/Users/m-1", junk: "x" } },
+	});
+	expect(user.attributes).toEqual({
+		phoneNumbers: [{ type: "work", value: "1" }],
+		[ENTERPRISE]: { manager: { value: "m-1", $ref: "/Users/m-1" } },
+	});
+	expect(user.emails).toEqual([{ value: "b@x.test" }]);
+	const merged = patchUser({ ...alice, ...user }, { Operations: [{ op: "replace", path: `${ENTERPRISE}:manager`, value: { displayName: "Boss" } }] });
+	expect(merged.attributes[ENTERPRISE]).toEqual({ manager: { value: "m-1", $ref: "/Users/m-1", displayName: "Boss" } });
+	const cleared = patchUser(merged, { Operations: [{ op: "replace", path: `${ENTERPRISE}:manager`, value: null }] });
+	expect(cleared.attributes).toEqual({ phoneNumbers: [{ type: "work", value: "1" }] });
+});

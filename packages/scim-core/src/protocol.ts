@@ -58,7 +58,8 @@ const userResource = z.preprocess(
 			externalId: text,
 			displayName: text,
 			name: z.unknown().optional(),
-			active: active.optional(),
+			// Null means unassigned (RFC 7643 §2.5), so it is treated as omitted.
+			active: active.nullish(),
 		},
 		{ error: "Expected a JSON object" },
 	),
@@ -101,6 +102,15 @@ const SUB_ATTRIBUTES = [
 	"country",
 	"displayName",
 ];
+const ENTRY_KEYS = [...SUB_ATTRIBUTES.filter((n) => n !== "displayName"), "$ref"];
+const MANAGER_KEYS = ["value", "displayName", "$ref"];
+/** Keeps the named keys whose values are plain strings or booleans, so nothing unknown is stored. */
+const known = (keys: string[], value: Json): Json =>
+	Object.fromEntries(
+		Object.entries(keysNamed(keys)(value) as Json).filter(
+			([key, v]) => keys.includes(key) && (typeof v === "boolean" || (typeof v === "string" && v.trim() !== "")),
+		),
+	);
 const named = (names: string[], name: string) => names.find((n) => n.toLowerCase() === name.toLowerCase());
 
 type Target = { attribute: string; extension?: true; filter?: { name: string; value: string }; sub?: string };
@@ -125,11 +135,12 @@ function targetOf(path: string): Target | undefined {
 
 function entriesOf(value: unknown): Json[] {
 	if (typeof value === "string") return value.trim() ? [{ value }] : [];
-	const entry = jsonObject.safeParse(keysNamed(SUB_ATTRIBUTES)(value));
+	const entry = jsonObject.safeParse(keysNamed(ENTRY_KEYS)(value));
 	if (!entry.success) return [];
-	const { primary, ...rest } = entry.data;
-	const flag = active.safeParse(primary);
-	return [{ ...rest, ...(flag.success ? { primary: flag.data } : {}) }];
+	const flag = active.safeParse(entry.data.primary);
+	const { primary: _given, ...rest } = known(ENTRY_KEYS, entry.data);
+	const kept = { ...rest, ...(flag.success ? { primary: flag.data } : {}) };
+	return Object.keys(kept).length ? [kept] : [];
 }
 
 /** A multi-valued attribute with no repeated pair and one primary (RFC 7643 §2.4). */
@@ -167,7 +178,10 @@ function writeEntries(entries: Json[], { filter, sub }: Target, value: unknown, 
 		if (sub) throw invalid("A sub-attribute of a list needs a filter");
 		return op === "add" ? [...entries, ...multiValued(value)] : multiValued(value);
 	}
-	const written = sub ? { [sub]: value } : (entriesOf(value)[0] ?? {});
+	const written: Json = sub ? { [sub]: value } : (entriesOf(value)[0] ?? {});
+	// The value made primary takes it from the others (RFC 7644 §3.5.2).
+	const primary = active.safeParse(written.primary);
+	if (primary.success && primary.data) entries = entries.map((e) => (e.primary === true ? { ...e, primary: false } : e));
 	if (entries.some((e) => matching(e, filter))) return entries.map((e) => (matching(e, filter) ? { ...e, ...written } : e));
 	// Entra sends replace for a typed value it has not set yet. Refusing would
 	// fail the whole request, which may also be ending someone's access.
@@ -198,10 +212,11 @@ function writeExtension(user: User, { attribute, sub }: Target, value: unknown) 
 	let next: unknown = text.parse(value);
 	if (attribute === "manager") {
 		const manager = jsonObject.catch({}).parse(stored.manager);
-		if (sub) next = text.parse(value) === undefined ? without(manager, sub) : { ...manager, [sub]: text.parse(value) };
+		if (sub) next = text.parse(value) === undefined ? without(manager, sub) : known(MANAGER_KEYS, { ...manager, [sub]: text.parse(value) });
 		else {
-			const entry = entriesOf(value)[0];
-			next = entry ?? undefined;
+			// Sub-attributes the value leaves out stay as they were (RFC 7644 §3.5.2.3).
+			const given = typeof value === "string" ? { value } : jsonObject.safeParse(value).data;
+			next = given ? { ...manager, ...known(MANAGER_KEYS, given) } : undefined;
 		}
 		if (next && !Object.keys(next).length) next = undefined;
 	}
