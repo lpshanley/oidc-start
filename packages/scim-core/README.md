@@ -6,7 +6,7 @@ The package owns the protocol: validation, PATCH, filters, paging, discovery and
 
 ## Status
 
-This is an early release. It covers Users, Groups and discovery. It was extracted from a production app whose SCIM endpoint has received authentik pushes, and the package itself has handled live pushes from a disposable authentik 2026.8.5 and from an Okta trial org, using the catalog's SCIM 2.0 Test App, a classic App Integration Wizard app and an app built in the newer Okta Integration Wizard. That traffic is kept in `recordings/` and replayed in the tests. Failures were tested too: Okta's and authentik's reactions to 503 and 409 answers are recorded below. **No real Entra push has been tested**, so try it before relying on it.
+This is an early release. It covers Users, Groups and discovery. It was extracted from a production app whose SCIM endpoint has received authentik pushes, and the package itself has handled live pushes from a disposable authentik 2026.8.5 and from an Okta trial org, using the catalog's SCIM 2.0 Test App, a classic App Integration Wizard app and an app built in the newer Okta Integration Wizard. That traffic is [kept in the repository](https://github.com/lpshanley/oidc-start/tree/main/packages/scim-core/recordings) and replayed in the tests. Failures were tested too: Okta's and authentik's reactions to 503 and 409 answers are recorded below. **No real Entra push has been tested**, so try it before relying on it.
 
 | Supported | Not supported yet |
 | --- | --- |
@@ -98,7 +98,7 @@ await scim.forConnection(connection).users.deactivate(id);
 
 ## Write an adapter
 
-A connection is whatever `authenticate` returns, usually one customer's directory. Implement [`ScimStore`](src/adapter.ts) for one connection, and return it from `read` and from `transaction`. Stores must only see that connection's rows.
+A connection is whatever `authenticate` returns, usually one customer's directory. Implement [`ScimStore`](https://github.com/lpshanley/oidc-start/blob/main/packages/scim-core/src/adapter.ts) for one connection, and return it from `read` and from `transaction`. Stores must only see that connection's rows.
 
 A user has first-class `emails`, and `attributes` holds the rest of the schema, such as `title`, `phoneNumbers` and the enterprise extension under its URN. Store `attributes` as JSON and return it unchanged. `store.users` must also filter on `id`, `email` and `emailType`, and `testScimAdapter` checks this.
 
@@ -127,11 +127,11 @@ test("a leaver loses access", async () => {
 });
 ```
 
-`createMemoryAdapter()` is a single-process adapter for trying the package and for fast tests. The `okta`, `okta-wizard`, `entra` and `authentik` dialects are modelled on vendor documentation and that app's records, not captured traffic, so they show your app handles those shapes, not that a real push works. In this repository, `recordings/authentik-2026.8.5.jsonl`, `recordings/okta-scim2-test-app-2026-11.jsonl` and `recordings/okta-classic-wizard-2026-11.jsonl` and `recordings/okta-integration-wizard-2026-11.jsonl` are captured traffic. All three Okta apps update a profile with a GET and a PUT. The test app and the newer wizard app deactivate and reactivate with a no-path PATCH and change groups with PATCH, and the classic wizard app uses PUT for all of those. `okta` is an OIN integration, and `okta-wizard` is an App Integration Wizard app, which updates with PUT.
+`createMemoryAdapter()` is a single-process adapter for trying the package and for fast tests. The `okta`, `okta-wizard`, `entra` and `authentik` dialects are modelled on vendor documentation and that app's records, not captured traffic, so they show your app handles those shapes, not that a real push works. The repository's [`recordings/`](https://github.com/lpshanley/oidc-start/tree/main/packages/scim-core/recordings) folder holds captured traffic from authentik and from three Okta app types. All three Okta apps update a profile with a GET and a PUT. The test app and the newer wizard app deactivate and reactivate with a no-path PATCH and change groups with PATCH, and the classic wizard app uses PUT for all of those. `okta` is an OIN integration, and `okta-wizard` is an App Integration Wizard app, which updates with PUT.
 
 ### When a request fails
 
-Okta's behaviour, observed against writes that failed (`recordings/okta-failures-2026-11.jsonl`):
+Okta's behaviour, observed against writes that failed ([`recordings/okta-failures-2026-11.jsonl`](https://github.com/lpshanley/oidc-start/blob/main/packages/scim-core/recordings/okta-failures-2026-11.jsonl)):
 
 - **It does not retry.** A create that answered 503 stayed failed for eight minutes, including after the server recovered. The admin has to select the assignment on the Tasks page and press **Retry Selected**, which repeats the lookup and the create.
 - **It shows your `detail` text** in the assignment's error, so keep those messages free of anything private.
@@ -140,11 +140,11 @@ Okta's behaviour, observed against writes that failed (`recordings/okta-failures
 
 So alert on `onProblem` with `kind: "failed"` for a `PATCH`, `PUT` or `DELETE`. Okta will not try again, and it only raises a task in its own console.
 
-To reproduce a failure against a real provider, the harness can fail writes on demand: write `{"mode":"unavailable","times":2}` (or `"conflict"`) to `harness/fault.json` while it runs.
+To reproduce a failure against a real provider, the harness can fail writes on demand: write `{"mode":"unavailable","times":2}` (or `"conflict"`) to `harness/fault.json` in the repository's [harness](https://github.com/lpshanley/oidc-start/blob/main/packages/scim-core/harness/server.mjs) while it runs.
 
 ### authentik
 
-Observed against authentik 2026.8.5 (`recordings/authentik-2026.8.5.jsonl` and `recordings/authentik-failures-2026.8.5.jsonl`):
+Observed against authentik 2026.8.5 ([`recordings/authentik-2026.8.5.jsonl`](https://github.com/lpshanley/oidc-start/blob/main/packages/scim-core/recordings/authentik-2026.8.5.jsonl) and [`recordings/authentik-failures-2026.8.5.jsonl`](https://github.com/lpshanley/oidc-start/blob/main/packages/scim-core/recordings/authentik-failures-2026.8.5.jsonl)):
 
 - **It retries failed writes by itself.** A user update that answered 503 was retried through authentik's job queue with growing delays, about one and a half, four and five minutes, and applied about a minute after the server recovered, ten minutes after the first failure. That is the opposite of Okta, so a short outage heals without anyone acting. How long it keeps trying is not known.
 - **A 409 on create makes it look the user up by `userName`,** then link to the match, or create again if there is none. A user that already existed is linked and not changed at first. Its next update, and every update in a full sync, then sends authentik's own `externalId`. By default the package stores it. With `externalId: "fixed"` each of those updates answers `400 mutability`, so a pre-existing user whose `externalId` differs stays stuck. Don't pre-create people with a different `externalId` if you choose `"fixed"`.
@@ -164,7 +164,7 @@ expect(await replayTraffic(scim, recording, { token })).toEqual([]);
 
 Read a recording before you commit it, because an attribute the scrubber doesn't know about keeps its value.
 
-In this repository, `harness/server.mjs` is a throwaway server for this. It keeps users in memory, and it listens on localhost, so a provider needs an HTTPS tunnel to reach it:
+In the repository, [`harness/server.mjs`](https://github.com/lpshanley/oidc-start/blob/main/packages/scim-core/harness/server.mjs) is a throwaway server for this. It keeps users in memory, and it listens on localhost, so a provider needs an HTTPS tunnel to reach it:
 
 ```bash
 pnpm --filter @lpshanley/scim-core build
