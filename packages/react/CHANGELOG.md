@@ -1,5 +1,17 @@
 # @lpshanley/oidc-start-react
 
+## 0.6.0
+
+### Minor Changes
+
+- 99ad2ed: Keep zod out of the browser. `hasRole`, `displayName`, `initials` and `sanitizeReturnPath` now also come from `@lpshanley/oidc-start-core/helpers`, which has no dependencies. Every existing import keeps working.
+
+### Patch Changes
+
+- Updated dependencies [b9e157f]
+- Updated dependencies [99ad2ed]
+  - @lpshanley/oidc-start-core@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

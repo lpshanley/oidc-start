@@ -1,5 +1,15 @@
 # @lpshanley/oidc-start-core
 
+## 0.6.0
+
+### Minor Changes
+
+- 99ad2ed: Keep zod out of the browser. `hasRole`, `displayName`, `initials` and `sanitizeReturnPath` now also come from `@lpshanley/oidc-start-core/helpers`, which has no dependencies. Every existing import keeps working.
+
+### Patch Changes
+
+- b9e157f: Report a token refresh that fails after it was sent to the provider. It reaches `onError` as a `refresh` failure with the reason `reauth_required`. A grant the provider ends with `invalid_grant` stays unreported.
+
 ## 0.5.0
 
 ### Minor Changes
