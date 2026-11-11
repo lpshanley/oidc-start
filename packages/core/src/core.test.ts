@@ -394,6 +394,14 @@ describe("origin configuration", () => {
 				configured({ ...local, APP_ORIGIN: `http://${host}`, OIDC_REDIRECT_URI: `http://${host}/callback` }).assertConfigured(),
 			).not.toThrow();
 		}
+		for (const scheme of ["ftp", "ws"]) {
+			expect(() => configured({ ...local, APP_ORIGIN: `${scheme}://localhost:3000` }).assertConfigured()).toThrow(
+				/APP_ORIGIN must use https in production/,
+			);
+			expect(() =>
+				configured({ ...local, APP_ORIGIN: "http://localhost:3000", OIDC_REDIRECT_URI: `${scheme}://localhost/callback` }).assertConfigured(),
+			).toThrow(/OIDC_REDIRECT_URI must use https in production/);
+		}
 		for (const host of ["sage.test", "10.0.0.5", "localhost.evil.test", "127.0.0.1.evil.test"]) {
 			expect(() => configured({ ...local, APP_ORIGIN: `http://${host}` }).assertConfigured()).toThrow(
 				/APP_ORIGIN must use https in production/,
@@ -489,6 +497,24 @@ test("still signs out when the provider cannot revoke the refresh token", async 
 	expect(onError).toHaveBeenCalledWith(
 		expect.objectContaining({ operation: "token-revocation" }),
 	);
+});
+
+test("back-channel logout stops reading when the request aborts, with no OIDC context", async () => {
+	const auth = createOidcCore({ allowSession, registry, environment: () => env, onError: vi.fn() });
+	const controller = new AbortController();
+	const body = new ReadableStream<Uint8Array>({
+		start: (c) => c.enqueue(new TextEncoder().encode("logout_token=")),
+	});
+	const request = new Request("https://internal:3000/auth/backchannel-logout", {
+		method: "POST",
+		headers: { "content-type": "application/x-www-form-urlencoded" },
+		body,
+		signal: controller.signal,
+		duplex: "half",
+	} as RequestInit);
+	setTimeout(() => controller.abort(), 10);
+
+	expect(await auth.backchannelLogout(request)).toEqual({ status: 400 });
 });
 
 test("ends the sessions a verified back-channel logout token names", async () => {

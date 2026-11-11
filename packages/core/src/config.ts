@@ -112,7 +112,7 @@ export const authOriginConfigurationSchema = z
 			if (!value) continue;
 			const url = new URL(value);
 			if (url.protocol === "https:") continue;
-			if (!allowLoopback || !LOOPBACK_HOSTS.has(url.hostname)) {
+			if (!allowLoopback || url.protocol !== "http:" || !LOOPBACK_HOSTS.has(url.hostname)) {
 				context.addIssue({
 					code: "custom",
 					path: [name],
