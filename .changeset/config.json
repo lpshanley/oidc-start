@@ -4,7 +4,8 @@
   "fixed": [
     [
       "@lpshanley/oidc-start-core",
-      "@lpshanley/oidc-start-react"
+      "@lpshanley/oidc-start-react",
+      "@lpshanley/scim-core"
     ]
   ],
   "linked": [],
