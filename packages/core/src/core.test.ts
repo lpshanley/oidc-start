@@ -385,9 +385,23 @@ describe("origin configuration", () => {
 		expect(() =>
 			configured({ ...http, OIDC_REDIRECT_URI: "http://sage.test/callback" }).assertConfigured(),
 		).toThrow(/OIDC_REDIRECT_URI must use https in production/);
-		expect(() =>
-			configured({ ...http, OIDC_ALLOW_INSECURE_ORIGIN: "true" }).assertConfigured(),
-		).not.toThrow();
+	});
+
+	test("the insecure override permits loopback hosts only", () => {
+		const local = { NODE_ENV: "production", OIDC_ALLOW_INSECURE_ORIGIN: "true" };
+		for (const host of ["localhost:3000", "127.0.0.1:3000", "[::1]:3000"]) {
+			expect(() =>
+				configured({ ...local, APP_ORIGIN: `http://${host}`, OIDC_REDIRECT_URI: `http://${host}/callback` }).assertConfigured(),
+			).not.toThrow();
+		}
+		for (const host of ["sage.test", "10.0.0.5", "localhost.evil.test", "127.0.0.1.evil.test"]) {
+			expect(() => configured({ ...local, APP_ORIGIN: `http://${host}` }).assertConfigured()).toThrow(
+				/APP_ORIGIN must use https in production/,
+			);
+			expect(() =>
+				configured({ ...local, APP_ORIGIN: "http://localhost:3000", OIDC_REDIRECT_URI: `http://${host}/callback` }).assertConfigured(),
+			).toThrow(/OIDC_REDIRECT_URI must use https in production/);
+		}
 	});
 
 	test("still allows an HTTP origin outside production", () => {

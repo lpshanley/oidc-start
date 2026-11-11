@@ -79,6 +79,8 @@ export const oidcConfigurationSchema = z.object({
 });
 export type OidcConfiguration = z.output<typeof oidcConfigurationSchema>;
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
 const emptyIsUnset = (value: unknown) => (value === "" ? undefined : value);
 
 export const authOriginConfigurationSchema = z
@@ -91,7 +93,7 @@ export const authOriginConfigurationSchema = z
 			emptyIsUnset,
 			z.url({ error: "OIDC_REDIRECT_URI must be a valid URL" }).optional(),
 		),
-		/** Set to "true" to serve a production build over plain HTTP, for local runs only. */
+		/** Set to "true" to run a production build over plain HTTP on a loopback host. */
 		OIDC_ALLOW_INSECURE_ORIGIN: z.string().optional(),
 		NODE_ENV: z.string().optional(),
 	})
@@ -104,14 +106,17 @@ export const authOriginConfigurationSchema = z
 				message: "APP_ORIGIN is required in production",
 			});
 		}
-		if (config.OIDC_ALLOW_INSECURE_ORIGIN === "true") return;
+		const allowLoopback = config.OIDC_ALLOW_INSECURE_ORIGIN === "true";
 		for (const name of ["APP_ORIGIN", "OIDC_REDIRECT_URI"] as const) {
 			const value = config[name];
-			if (value && new URL(value).protocol !== "https:") {
+			if (!value) continue;
+			const url = new URL(value);
+			if (url.protocol === "https:") continue;
+			if (!allowLoopback || !LOOPBACK_HOSTS.has(url.hostname)) {
 				context.addIssue({
 					code: "custom",
 					path: [name],
-					message: `${name} must use https in production (set OIDC_ALLOW_INSECURE_ORIGIN=true for a local run)`,
+					message: `${name} must use https in production (OIDC_ALLOW_INSECURE_ORIGIN=true permits http only for localhost, 127.0.0.1 and [::1])`,
 				});
 			}
 		}
