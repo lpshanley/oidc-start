@@ -7,10 +7,12 @@ export type OidcMiddlewareSetup =
 	| OidcMiddlewareOptions
 	| {
 			/**
-			 * A core the app composed itself, resolved on first request from
-			 * the context earlier request middleware provided.
+			 * A core the app composed itself. One middleware serves one core:
+			 * this is called once, on the first request, and the result is
+			 * reused for every request after. It cannot choose a core per
+			 * request. For several tenants, create one middleware per tenant.
 			 */
-			core: (context: unknown) => OidcCore;
+			core: () => OidcCore;
 	  };
 
 /** `context.requestContext` from an earlier middleware, when it has the shape. */
@@ -37,7 +39,7 @@ export function oidcMiddleware(setup: OidcMiddlewareSetup) {
 	let core: OidcCore | undefined;
 	return createMiddleware({ type: "request" }).server(
 		async ({ request, next, context }) => {
-			if ("core" in setup) core ??= setup.core(context);
+			if ("core" in setup) core ??= setup.core();
 			else {
 				const { createOidcCore } = await import("@lpshanley/oidc-start-core");
 				core ??= createOidcCore(setup);
