@@ -1,3 +1,4 @@
+import { readLogoutToken } from "./body.js";
 import { withinDeadline } from "./deadline.js";
 import { randomNonce, randomPKCECodeVerifier, randomState } from "openid-client";
 import {
@@ -451,9 +452,8 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 
 		/** OIDC Back-Channel Logout §§2.6–2.8: validate, commit, then acknowledge. */
 		async backchannelLogout(request: Request, context?: OidcCallContext): Promise<{ status: 200 | 400 }> {
-			const form = await request.formData().catch(() => undefined);
-			const token = form?.get("logout_token");
-			if (typeof token !== "string" || token.length === 0) return { status: 400 };
+			const token = await readLogoutToken(request);
+			if (token === undefined) return { status: 400 };
 			let target: LogoutTarget;
 			try {
 				target = await withinDeadline(() => provider().verifyLogoutToken(token, context), context);
