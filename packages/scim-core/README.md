@@ -68,12 +68,14 @@ Providers authenticate with a bearer token, so exempt this path from any browser
 | `onChange(change, context)` | Runs inside the transaction for every change. Use it for audit rows. |
 | `onCommitted(change, context)` | Runs after commit. A failure here can't undo the change, and it is reported to `onProblem`. |
 | `onProblem(problem)` | Reports refused and failed requests. A refusal can leave a leaver with access, so alert on these. |
+| `externalId` | `"mutable"` (the default) or `"fixed"`. See [Behaviour worth knowing](#behaviour-worth-knowing). |
 | `basePath`, `origin`, `documentationUri` | Where the routes live and what discovery reports. |
 
 ### Behaviour worth knowing
 
 - **Omitted fields on PUT:** a missing `active` or `externalId` keeps its current value, so a sparse update can't reactivate someone or break a link.
-- **`externalId` is fixed once set:** changing it answers `400 mutability`, which is stricter than RFC 7643. A deactivation still goes through and keeps the stored value, and the change carries `externalIdConflict`.
+- **`externalId` can change:** Entra sends a mail alias as `externalId` by default, and it changes when a person is renamed. The new value is stored, and the change carries `previousExternalId`, so relink there if your app links on it. Removing it is still refused.
+- **`externalId: "fixed"` refuses that change:** choose it when your app treats `externalId` as the link to a sign-in identity. A change then answers `400 mutability`, which is stricter than RFC 7643 and fails the whole request, including a rename sent with it. A deactivation still goes through and keeps the stored value, and the change carries `externalIdConflict`.
 - **Storage failures answer 503, never 404:** a 404 would tell the provider the user is gone.
 - **Unknown attributes are accepted and dropped:** refusing one would fail the whole request, which might also be a deactivation. This includes unknown sub-attributes inside a list entry or `manager`. `/Schemas` lists what is kept.
 - **`null` means unassigned:** on POST and PUT, a null value is treated as omitted. A null `userName` is still refused.
@@ -149,7 +151,7 @@ SCIM_HARNESS_TOKEN="$(openssl rand -hex 32)" node harness/server.mjs
 
 The two packages don't depend on each other, and SCIM users aren't `AuthUser`s: someone can be provisioned before they ever sign in. Linking them is a choice your app makes:
 
-- **Link deliberately.** A SCIM `id` or `externalId` is not automatically an OIDC `(issuer, sub)`. Only treat `externalId` as `sub` if your provider's configuration guarantees it. Linking by email at first sign-in needs a verified email claim from a trusted issuer.
+- **Link deliberately.** A SCIM `id` or `externalId` is not automatically an OIDC `(issuer, sub)`. Only treat `externalId` as `sub` if your provider's configuration guarantees it, and then set `externalId: "fixed"`. Linking by email at first sign-in needs a verified email claim from a trusted issuer.
 - **Refuse deprovisioned users.** Check your directory in `allowSession`.
 - **End current sessions.** Call `SessionRegistry.endAll` once the change commits:
 

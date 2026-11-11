@@ -107,9 +107,26 @@ test("responses carry the resource, its location and paging", async () => {
 	expect((await get(scim, `/Users?filter=${encodeURIComponent('title eq "x"')}`)).body.scimType).toBe("invalidFilter");
 });
 
-test("a deactivation wins over a different externalId, which is not stored", async () => {
+test("a provider can change externalId along with the rest of a rename, and the change says what it replaced", async () => {
 	const changes: ScimChange[] = [];
-	const { adapter, scim } = setup({ onChange: async (change) => void changes.push(change) });
+	const { scim } = setup({ onChange: async (change) => void changes.push(change) });
+	const users = scim.forConnection("acme").users;
+	const created = await users.create({ userName: "jsmith@x.test", externalId: "jsmith" });
+	const renamed = await users.patch(created.id, {
+		Operations: [
+			{ op: "Replace", path: "userName", value: "jdoe@x.test" },
+			{ op: "Replace", path: "externalId", value: "jdoe" },
+		],
+	});
+	expect(renamed).toMatchObject({ userName: "jdoe@x.test", externalId: "jdoe" });
+	expect(changes.at(-1)).toMatchObject({ type: "user.updated", previousExternalId: "jsmith" });
+	await users.patch(created.id, { Operations: [{ op: "replace", path: "title", value: "Dr" }] });
+	expect(changes.at(-1)).not.toHaveProperty("previousExternalId");
+});
+
+test("with a fixed externalId, a deactivation wins over a different one, which is not stored", async () => {
+	const changes: ScimChange[] = [];
+	const { adapter, scim } = setup({ externalId: "fixed", onChange: async (change) => void changes.push(change) });
 	const users = scim.forConnection("acme").users;
 	const user = await users.create({ userName: "a@x.test", externalId: "ext-1" });
 	await expect(users.replace(user.id, { userName: "a@x.test", externalId: "other" })).rejects.toMatchObject({
@@ -119,6 +136,7 @@ test("a deactivation wins over a different externalId, which is not stored", asy
 	await users.replace(user.id, { userName: "a@x.test", externalId: "other", active: false });
 	expect(await adapter.read("acme").user(user.id)).toMatchObject({ active: false, externalId: "ext-1" });
 	expect(changes.at(-1)).toMatchObject({ type: "user.deactivated", externalIdConflict: true });
+	expect(changes.at(-1)).not.toHaveProperty("previousExternalId");
 });
 
 test("an application can deprovision without HTTP, through the same path", async () => {

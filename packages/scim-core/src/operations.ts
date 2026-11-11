@@ -7,12 +7,15 @@ import type { ScimGroup, ScimGroupChange, ScimGroupFields, ScimGroupFilter, Scim
 type Details = Record<string, unknown>;
 type GroupSummary = { id: string; displayName: string };
 
+/** Present when the stored externalId changed, with the value it replaced. Relink on this if you link by externalId. */
+type ExternalIdChange = { previousExternalId?: string | null };
+
 /** What a committed request changed. */
 export type ScimChange<TUser extends ScimUser = ScimUser> =
 	| { type: "user.created"; user: TUser }
-	| { type: "user.updated"; user: TUser }
-	/** `externalIdConflict`: the request sent a different externalId, which was not stored. */
-	| { type: "user.deactivated"; user: TUser; details?: Details; externalIdConflict?: true }
+	| ({ type: "user.updated"; user: TUser } & ExternalIdChange)
+	/** `externalIdConflict`: with a fixed externalId, the request sent a different one, which was not stored. */
+	| ({ type: "user.deactivated"; user: TUser; details?: Details; externalIdConflict?: true } & ExternalIdChange)
 	| { type: "user.deleted"; user: TUser; details?: Details }
 	| { type: "group.created"; group: GroupSummary; members: number }
 	| { type: "group.replaced"; group: GroupSummary; members: number }
@@ -37,6 +40,7 @@ export type ScimHooks<TConnection, TUser extends ScimUser, TTransaction> = {
 
 type Options<TConnection, TUser extends ScimUser, TTransaction> = ScimHooks<TConnection, TUser, TTransaction> & {
 	adapter: ScimAdapter<TConnection, TUser, TTransaction>;
+	externalId?: "mutable" | "fixed";
 	/** Reports a hook that failed after commit. */
 	afterCommitFailed(error: unknown): void;
 };
@@ -112,7 +116,8 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 			const current = await store.user(id);
 			if (!current) throw notFound();
 			const fields = next(fieldsOf(current));
-			const conflict = current.externalId !== null && fields.externalId !== current.externalId;
+			const conflict =
+				options.externalId === "fixed" && current.externalId !== null && fields.externalId !== current.externalId;
 			const deactivating = current.active && !fields.active;
 			// Ending access matters more than a clean request, so a deactivation
 			// still goes through and the stored externalId stays as it was.
@@ -122,6 +127,7 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 			if (isDeepStrictEqual(stored, fieldsOf(current))) return current;
 			const user = await store.replaceUser(id, stored);
 			if (!user) throw notFound();
+			const relinked = stored.externalId === current.externalId ? {} : { previousExternalId: current.externalId };
 			if (deactivating) {
 				const details = await deprovision(user, tx, "deactivated");
 				await record({
@@ -129,8 +135,9 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 					user,
 					...(details ? { details } : {}),
 					...(conflict ? { externalIdConflict: true as const } : {}),
+					...relinked,
 				});
-			} else await record({ type: "user.updated", user });
+			} else await record({ type: "user.updated", user, ...relinked });
 			return user;
 		});
 

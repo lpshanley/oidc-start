@@ -32,6 +32,14 @@ export type ScimOptions<TConnection, TUser extends ScimUser, TTransaction> = Sci
 	/** The public origin, when `request.url` does not carry it behind a proxy. */
 	origin?: string;
 	documentationUri?: string;
+	/**
+	 * Whether a provider may change a user's externalId once it is set. Entra
+	 * sends a mutable alias here by default, so the default is "mutable", and
+	 * the change carries `previousExternalId`. Choose "fixed" when your app
+	 * treats externalId as the link to a sign-in identity: a change then answers
+	 * 400 mutability, except that a deactivation still goes through.
+	 */
+	externalId?: "mutable" | "fixed";
 	/** A refused request can leave a leaver with access, so report these. Must not throw. */
 	onProblem?(problem: ScimProblem): void;
 };
