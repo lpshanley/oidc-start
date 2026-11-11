@@ -1,5 +1,18 @@
 # @lpshanley/oidc-start-react
 
+## 0.7.0
+
+### Minor Changes
+
+- 619ea7d: `oidcMiddleware({ core })` now takes a function with no arguments. It was always called once and cached, so the `context` it received only reflected the first request. The singleton contract is now explicit in the type and the README.
+- 3b564b6: `getSignInUrl` is now a POST server function and its response carries `Cache-Control: no-store`. It starts a sign-in flow and sets a verifier cookie, so the CSRF middleware now covers it. Calls through `useAuth()` or `getSignInUrl({ data })` need no change; the GET sign-in route is unchanged.
+
+### Patch Changes
+
+- Updated dependencies [e3368c4]
+- Updated dependencies [613b586]
+  - @lpshanley/oidc-start-core@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes

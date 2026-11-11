@@ -1,5 +1,15 @@
 # @lpshanley/oidc-start-core
 
+## 0.7.0
+
+### Minor Changes
+
+- 613b586: A malformed `OIDC_REDIRECT_URI` now fails `assertConfigured()` instead of silently falling back to a generated callback URL. In production, `APP_ORIGIN` is required and must use https. A local run of a production build over HTTP needs `OIDC_ALLOW_INSECURE_ORIGIN=true`, which accepts only `localhost`, `127.0.0.1` and `[::1]`.
+
+### Patch Changes
+
+- e3368c4: Back-channel logout now reads at most 16 KiB of an `application/x-www-form-urlencoded` body, enforced while streaming, and refuses a `logout_token` over 8 KiB or one sent more than once. The whole body must arrive within 5 seconds or when the request is aborted, whichever is first. Other encodings get a 400.
+
 ## 0.6.0
 
 ### Minor Changes

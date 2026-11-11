@@ -1,5 +1,11 @@
 # @lpshanley/scim-core
 
+## 0.7.0
+
+### Patch Changes
+
+- 40ab87d: A throwing or rejecting `onProblem` callback can no longer reject `handle()` or fail a write that already committed. Reporter failures are now dropped.
+
 ## 0.6.0
 
 ### Minor Changes
