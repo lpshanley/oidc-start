@@ -6,15 +6,16 @@ import { resolve } from "node:path";
 
 const [mode, tag, directory, selected] = process.argv.slice(2);
 assert.ok(["check", "stage"].includes(mode) && tag && directory,
-	"Usage: node scripts/npm-release.mjs <check|stage> <[scim-core-]vX.Y.Z[-next.N]> <tarball-directory> [core|react|scim-core]");
-// A vX.Y.Z tag releases the OIDC pair, which share a version. scim-core has its own version and tag.
-const release = /^(scim-core-)?v((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.(0|[1-9]\d*))?)$/.exec(tag);
-assert.ok(release, `Unrecognized release tag ${tag}`);
-const version = release[2];
-const parts = release[1]
-	? [{ part: "scim-core", name: "@lpshanley/scim-core" }]
-	: ["core", "react"].map((part) => ({ part, name: `@lpshanley/oidc-start-${part}` }));
-if (mode === "stage") assert.ok(parts.some(({ part }) => part === selected), "Select one package of this tag to stage");
+	"Usage: node scripts/npm-release.mjs <check|stage> <vX.Y.Z[-next.N]> <tarball-directory> [core|react|scim-core]");
+// One vX.Y.Z tag releases all three packages, which share a version.
+const parts = [
+	{ part: "core", name: "@lpshanley/oidc-start-core" },
+	{ part: "react", name: "@lpshanley/oidc-start-react" },
+	{ part: "scim-core", name: "@lpshanley/scim-core" },
+];
+if (mode === "stage") assert.ok(parts.some(({ part }) => part === selected), "Select one package to stage");
+assert.match(tag, /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.(0|[1-9]\d*))?$/);
+const version = tag.slice(1);
 const distTag = version.includes("-next.") ? "next" : "latest";
 const registry = "https://registry.npmjs.org";
 const license = readFileSync(new URL("../LICENSE", import.meta.url), "utf8");
@@ -37,7 +38,7 @@ const packages = parts.map(({ part, name }) => {
 });
 
 if (mode === "stage") {
-	// Every archive of the tag must match it. Each CI job stages one so failed jobs
+	// Every archive must match the tag. Each CI job stages one so failed jobs
 	// can retry without submitting a sibling that is already awaiting approval.
 	let archive;
 	for (const pkg of packages) {
