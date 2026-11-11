@@ -29,7 +29,9 @@ const scim = recordTraffic(
 
 createServer(async (incoming, outgoing) => {
 	const hasBody = incoming.method !== "GET" && incoming.method !== "HEAD";
-	const request = new Request(`http://${incoming.headers.host}${incoming.url}`, {
+	// Behind an HTTPS tunnel the public scheme arrives in a header, and resource locations must use it.
+	const scheme = incoming.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+	const request = new Request(`${scheme}://${incoming.headers.host}${incoming.url}`, {
 		method: incoming.method,
 		headers: Object.entries(incoming.headers).flatMap(([name, value]) => (typeof value === "string" ? [[name, value]] : [])),
 		...(hasBody ? { body: Readable.toWeb(incoming), duplex: "half" } : {}),
