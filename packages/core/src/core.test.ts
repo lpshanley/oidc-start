@@ -363,6 +363,44 @@ describe("assertConfigured", () => {
 	});
 });
 
+describe("origin configuration", () => {
+	const configured = (extra: Record<string, string>) =>
+		createOidcCore({ allowSession, registry, environment: () => ({ ...env, ...extra }) });
+
+	test("rejects a malformed OIDC_REDIRECT_URI instead of ignoring it", () => {
+		expect(() => configured({ OIDC_REDIRECT_URI: "not a url" }).assertConfigured()).toThrow(
+			/OIDC_REDIRECT_URI must be a valid URL/,
+		);
+	});
+
+	test("requires APP_ORIGIN in production", () => {
+		expect(() => configured({ APP_ORIGIN: "", NODE_ENV: "production" }).assertConfigured()).toThrow(
+			/APP_ORIGIN is required in production/,
+		);
+	});
+
+	test("refuses HTTP origins in production unless explicitly allowed", () => {
+		const http = { APP_ORIGIN: "http://sage.test", NODE_ENV: "production" };
+		expect(() => configured(http).assertConfigured()).toThrow(/APP_ORIGIN must use https in production/);
+		expect(() =>
+			configured({ ...http, OIDC_REDIRECT_URI: "http://sage.test/callback" }).assertConfigured(),
+		).toThrow(/OIDC_REDIRECT_URI must use https in production/);
+		expect(() =>
+			configured({ ...http, OIDC_ALLOW_INSECURE_ORIGIN: "true" }).assertConfigured(),
+		).not.toThrow();
+	});
+
+	test("still allows an HTTP origin outside production", () => {
+		expect(() => configured({ APP_ORIGIN: "http://localhost:5173" }).assertConfigured()).not.toThrow();
+	});
+
+	test("fails a sign-in at request time on a malformed OIDC_REDIRECT_URI", async () => {
+		await expect(
+			configured({ OIDC_REDIRECT_URI: "nope" }).signIn(request("/"), new Map()),
+		).rejects.toThrow();
+	});
+});
+
 describe("withinDeadline", () => {
 	test("passes work through without a deadline", async () => {
 		await expect(withinDeadline(() => Promise.resolve(1))).resolves.toBe(1);

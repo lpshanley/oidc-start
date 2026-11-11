@@ -79,14 +79,43 @@ export const oidcConfigurationSchema = z.object({
 });
 export type OidcConfiguration = z.output<typeof oidcConfigurationSchema>;
 
-export const authOriginConfigurationSchema = z.object({
-	APP_ORIGIN: z.preprocess(
-		(value) => (value === "" ? undefined : value),
-		z.url({ error: "APP_ORIGIN must be a valid URL" }).optional(),
-	),
-	OIDC_REDIRECT_URI: z.url().optional().catch(undefined),
-	NODE_ENV: z.string().optional(),
-});
+const emptyIsUnset = (value: unknown) => (value === "" ? undefined : value);
+
+export const authOriginConfigurationSchema = z
+	.object({
+		APP_ORIGIN: z.preprocess(
+			emptyIsUnset,
+			z.url({ error: "APP_ORIGIN must be a valid URL" }).optional(),
+		),
+		OIDC_REDIRECT_URI: z.preprocess(
+			emptyIsUnset,
+			z.url({ error: "OIDC_REDIRECT_URI must be a valid URL" }).optional(),
+		),
+		/** Set to "true" to serve a production build over plain HTTP, for local runs only. */
+		OIDC_ALLOW_INSECURE_ORIGIN: z.string().optional(),
+		NODE_ENV: z.string().optional(),
+	})
+	.superRefine((config, context) => {
+		if (config.NODE_ENV !== "production") return;
+		if (!config.APP_ORIGIN) {
+			context.addIssue({
+				code: "custom",
+				path: ["APP_ORIGIN"],
+				message: "APP_ORIGIN is required in production",
+			});
+		}
+		if (config.OIDC_ALLOW_INSECURE_ORIGIN === "true") return;
+		for (const name of ["APP_ORIGIN", "OIDC_REDIRECT_URI"] as const) {
+			const value = config[name];
+			if (value && new URL(value).protocol !== "https:") {
+				context.addIssue({
+					code: "custom",
+					path: [name],
+					message: `${name} must use https in production (set OIDC_ALLOW_INSECURE_ORIGIN=true for a local run)`,
+				});
+			}
+		}
+	});
 
 export function assertOidcConfigured(env: AuthEnvironment) {
 	const issues = [
