@@ -191,6 +191,14 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 				await commit(async (store, _tx, record) => {
 					const current = await store.group(id);
 					if (!current) throw notFound();
+					// Okta's wizard apps send a PUT that repeats the group as it is. Like a
+					// no-op PATCH, it keeps lastModified and runs no hook.
+					const same = unchanged(current, [
+						{ kind: "rename", displayName: fields.displayName },
+						{ kind: "externalId", externalId: fields.externalId ?? current.externalId },
+						{ kind: "replace", ids: fields.memberIds },
+					]);
+					if (same) return;
 					await store.renameGroup(id, fields.displayName, fields.externalId ?? current.externalId);
 					await store.setMembers(id, fields.memberIds);
 					await record({

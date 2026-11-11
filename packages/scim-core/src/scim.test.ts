@@ -124,6 +124,19 @@ test("a provider can change externalId along with the rest of a rename, and the 
 	expect(changes.at(-1)).not.toHaveProperty("previousExternalId");
 });
 
+test("a group PUT that changes nothing runs no hook and keeps lastModified", async () => {
+	const changes: ScimChange[] = [];
+	const { scim } = setup({ onChange: async (change) => void changes.push(change) });
+	const directory = scim.forConnection("acme");
+	const user = await directory.users.create({ userName: "a@x.test" });
+	const group = await directory.groups.create({ displayName: "eng", externalId: null, memberIds: [user.id] });
+	const same = await directory.groups.replace(group.id, { displayName: "eng", externalId: null, memberIds: [user.id] });
+	expect(same.updatedAt).toBe(group.updatedAt);
+	expect(changes.map((c) => c.type)).toEqual(["user.created", "group.created"]);
+	await directory.groups.replace(group.id, { displayName: "eng", externalId: null, memberIds: [] });
+	expect(changes.at(-1)).toMatchObject({ type: "group.replaced", members: 0 });
+});
+
 test("reactivating a user is its own change", async () => {
 	const changes: ScimChange[] = [];
 	const { scim } = setup({ onChange: async (change) => void changes.push(change) });
