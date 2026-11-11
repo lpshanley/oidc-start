@@ -124,6 +124,17 @@ test("a provider can change externalId along with the rest of a rename, and the 
 	expect(changes.at(-1)).not.toHaveProperty("previousExternalId");
 });
 
+test("reactivating a user is its own change", async () => {
+	const changes: ScimChange[] = [];
+	const { scim } = setup({ onChange: async (change) => void changes.push(change) });
+	const users = scim.forConnection("acme").users;
+	const user = await users.create({ userName: "a@x.test" });
+	await users.deactivate(user.id);
+	await users.patch(user.id, { Operations: [{ op: "Replace", path: "active", value: "True" }] });
+	await users.patch(user.id, { Operations: [{ op: "replace", path: "title", value: "Dr" }] });
+	expect(changes.map((c) => c.type)).toEqual(["user.created", "user.deactivated", "user.reactivated", "user.updated"]);
+});
+
 test("with a fixed externalId, a deactivation wins over a different one, which is not stored", async () => {
 	const changes: ScimChange[] = [];
 	const { adapter, scim } = setup({ externalId: "fixed", onChange: async (change) => void changes.push(change) });

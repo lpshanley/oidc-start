@@ -76,6 +76,7 @@ Providers authenticate with a bearer token, so exempt this path from any browser
 - **Omitted fields on PUT:** a missing `active` or `externalId` keeps its current value, so a sparse update can't reactivate someone or break a link.
 - **`externalId` can change:** Entra sends a mail alias as `externalId` by default, and it changes when a person is renamed. The new value is stored, and the change carries `previousExternalId`, so relink there if your app links on it. Removing it is still refused.
 - **`externalId: "fixed"` refuses that change:** choose it when your app treats `externalId` as the link to a sign-in identity. A change then answers `400 mutability`, which is stricter than RFC 7643 and fails the whole request, including a rename sent with it. A deactivation still goes through and keeps the stored value, and the change carries `externalIdConflict`.
+- **Reactivation is its own change:** an inactive user made active again reports `user.reactivated`, not `user.updated`, so you can restore what `onUserDeprovisioned` ended.
 - **Storage failures answer 503, never 404:** a 404 would tell the provider the user is gone.
 - **Unknown attributes are accepted and dropped:** refusing one would fail the whole request, which might also be a deactivation. This includes unknown sub-attributes inside a list entry or `manager`. `/Schemas` lists what is kept.
 - **`null` means unassigned:** on POST and PUT, a null value is treated as omitted. A null `userName` is still refused.

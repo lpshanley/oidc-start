@@ -14,6 +14,8 @@ type ExternalIdChange = { previousExternalId?: string | null };
 export type ScimChange<TUser extends ScimUser = ScimUser> =
 	| { type: "user.created"; user: TUser }
 	| ({ type: "user.updated"; user: TUser } & ExternalIdChange)
+	/** An inactive user became active again, so access ended at deactivation can be restored. */
+	| ({ type: "user.reactivated"; user: TUser } & ExternalIdChange)
 	/** `externalIdConflict`: with a fixed externalId, the request sent a different one, which was not stored. */
 	| ({ type: "user.deactivated"; user: TUser; details?: Details; externalIdConflict?: true } & ExternalIdChange)
 	| { type: "user.deleted"; user: TUser; details?: Details }
@@ -119,6 +121,7 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 			const conflict =
 				options.externalId === "fixed" && current.externalId !== null && fields.externalId !== current.externalId;
 			const deactivating = current.active && !fields.active;
+			const reactivating = !current.active && fields.active;
 			// Ending access matters more than a clean request, so a deactivation
 			// still goes through and the stored externalId stays as it was.
 			if (conflict && !deactivating) throw new ScimError(400, "mutability", "externalId cannot change");
@@ -137,7 +140,7 @@ export function createOperations<TConnection, TUser extends ScimUser, TTransacti
 					...(conflict ? { externalIdConflict: true as const } : {}),
 					...relinked,
 				});
-			} else await record({ type: "user.updated", user, ...relinked });
+			} else await record({ type: reactivating ? "user.reactivated" : "user.updated", user, ...relinked });
 			return user;
 		});
 
