@@ -6,7 +6,7 @@ The package owns the protocol: validation, PATCH, filters, paging, discovery and
 
 ## Status
 
-This is an early release. It covers Users, Groups and discovery. It was extracted from a production app whose SCIM endpoint has received authentik pushes. **This package itself has not been tested against a live provider, and no real Okta or Entra push has been tested at all**, so try your provider before relying on it.
+This is an early release. It covers Users, Groups and discovery. It was extracted from a production app whose SCIM endpoint has received authentik pushes, and the package itself has handled live pushes from a disposable authentik 2026.8.5 and from an Okta trial org, using the catalog's SCIM 2.0 Test App, a classic App Integration Wizard app and an app built in the newer Okta Integration Wizard. That traffic is kept in `recordings/` and replayed in the tests. Failures were tested too: Okta's and authentik's reactions to 503 and 409 answers are recorded below. **No real Entra push has been tested**, so try it before relying on it.
 
 | Supported | Not supported yet |
 | --- | --- |
@@ -77,7 +77,7 @@ Providers authenticate with a bearer token, so exempt this path from any browser
 - **`externalId` can change:** Entra sends a mail alias as `externalId` by default, and it changes when a person is renamed. The new value is stored, and the change carries `previousExternalId`, so relink there if your app links on it. Removing it is still refused.
 - **`externalId: "fixed"` refuses that change:** choose it when your app treats `externalId` as the link to a sign-in identity. A change then answers `400 mutability`, which is stricter than RFC 7643 and fails the whole request, including a rename sent with it. A deactivation still goes through and keeps the stored value, and the change carries `externalIdConflict`.
 - **Reactivation is its own change:** an inactive user made active again reports `user.reactivated`, not `user.updated`, so you can restore what `onUserDeprovisioned` ended.
-- **Storage failures answer 503, never 404:** a 404 would tell the provider the user is gone.
+- **Storage failures answer 503, never 404:** a 404 would tell the provider the user is gone. Okta shows its admin the package's own `detail` text, and then does not retry. See [When a request fails](#when-a-request-fails).
 - **Unknown attributes are accepted and dropped:** refusing one would fail the whole request, which might also be a deactivation. This includes unknown sub-attributes inside a list entry or `manager`. `/Schemas` lists what is kept.
 - **`null` means unassigned:** on POST and PUT, a null value is treated as omitted. A null `userName` is still refused.
 - **No `meta.version`:** ETags aren't supported, so responses don't claim a version. Your store still tracks one for your own use.
@@ -86,7 +86,7 @@ Providers authenticate with a bearer token, so exempt this path from any browser
 - **A value filter beyond `type` or `value` is dropped:** a path such as `emails[type eq "work" and primary eq true].value` is valid, not applied, and answers 200 like an unknown attribute.
 - **Two spellings of one attribute:** if a body has both `active` and `Active`, the canonical spelling wins.
 - **A missing `schemas` is accepted:** on any request, which is more lenient than the RFC.
-- **A change that changes nothing is skipped:** a PATCH or user PUT that leaves the resource as it was keeps its `lastModified`, and no hook runs.
+- **A change that changes nothing is skipped:** a PATCH or PUT that leaves the resource as it was keeps its `lastModified`, and no hook runs. Okta's wizard apps send such PUTs for groups.
 
 ## Use it without HTTP
 
@@ -127,7 +127,31 @@ test("a leaver loses access", async () => {
 });
 ```
 
-`createMemoryAdapter()` is a single-process adapter for trying the package and for fast tests. The `okta`, `okta-wizard`, `entra` and `authentik` dialects are modelled on vendor documentation and that app's records, not captured traffic, so they show your app handles those shapes, not that a real push works. `okta` is an OIN integration, and `okta-wizard` is an App Integration Wizard app, which updates with PUT.
+`createMemoryAdapter()` is a single-process adapter for trying the package and for fast tests. The `okta`, `okta-wizard`, `entra` and `authentik` dialects are modelled on vendor documentation and that app's records, not captured traffic, so they show your app handles those shapes, not that a real push works. In this repository, `recordings/authentik-2026.8.5.jsonl`, `recordings/okta-scim2-test-app-2026-11.jsonl` and `recordings/okta-classic-wizard-2026-11.jsonl` and `recordings/okta-integration-wizard-2026-11.jsonl` are captured traffic. All three Okta apps update a profile with a GET and a PUT. The test app and the newer wizard app deactivate and reactivate with a no-path PATCH and change groups with PATCH, and the classic wizard app uses PUT for all of those. `okta` is an OIN integration, and `okta-wizard` is an App Integration Wizard app, which updates with PUT.
+
+### When a request fails
+
+Okta's behaviour, observed against writes that failed (`recordings/okta-failures-2026-11.jsonl`):
+
+- **It does not retry.** A create that answered 503 stayed failed for eight minutes, including after the server recovered. The admin has to select the assignment on the Tasks page and press **Retry Selected**, which repeats the lookup and the create.
+- **It shows your `detail` text** in the assignment's error, so keep those messages free of anything private.
+- **A 409 on create is a plain failure.** Okta does not look the user up again or link them.
+- **A failed deactivation becomes a manual task.** Okta creates "Application accounts need deprovisioning" for the admin and sent no retry in the three minutes we watched. Until someone acts, the person is still active in your app. A deactivation sent by unassigning someone and one sent by deactivating them in Okta are the same `PATCH`.
+
+So alert on `onProblem` with `kind: "failed"` for a `PATCH`, `PUT` or `DELETE`. Okta will not try again, and it only raises a task in its own console.
+
+To reproduce a failure against a real provider, the harness can fail writes on demand: write `{"mode":"unavailable","times":2}` (or `"conflict"`) to `harness/fault.json` while it runs.
+
+### authentik
+
+Observed against authentik 2026.8.5 (`recordings/authentik-2026.8.5.jsonl` and `recordings/authentik-failures-2026.8.5.jsonl`):
+
+- **It retries failed writes by itself.** A user update that answered 503 was retried through authentik's job queue with growing delays, about one and a half, four and five minutes, and applied about a minute after the server recovered, ten minutes after the first failure. That is the opposite of Okta, so a short outage heals without anyone acting. How long it keeps trying is not known.
+- **A 409 on create makes it look the user up by `userName`,** then link to the match, or create again if there is none. A user that already existed is linked and not changed at first. Its next update, and every update in a full sync, then sends authentik's own `externalId`. By default the package stores it. With `externalId: "fixed"` each of those updates answers `400 mutability`, so a pre-existing user whose `externalId` differs stays stuck. Don't pre-create people with a different `externalId` if you choose `"fixed"`.
+- **Attributes outside the kept set are dropped.** A custom property mapping sent `costCenter` and a custom schema URN, and the package answered 200 and stored neither. `title`, `phoneNumbers` and the enterprise extension were kept.
+- **All seven compatibility modes work:** default, aws, slack, sfdc, gitlab, webex and vcenter. AWS, Salesforce, GitLab and vCenter change groups with `PUT` where the others use `PATCH`, and Webex adds `"type": "user"` to members. Salesforce mode asks for `/ServiceProviderConfigs`, which answers 404 and does no harm.
+- **The default full sync runs every four hours** (`49 */4 * * *`), not every hour. It sends a `PUT` for every user, and the package skips the ones that changed nothing.
+- **Volume:** 300 new users synced in under two minutes, listing paged correctly at 100 a time, and a full sync of 305 users finished in under a minute with no errors. Authentik itself left two of the 300 unpushed until the next full sync, with no error in either system, so a user can be missing for up to four hours.
 
 ### Capture real traffic
 
