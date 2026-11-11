@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { redirect } from "@tanstack/react-router";
 import { z } from "zod";
-import { sanitizeReturnPath, signInOptionsSchema, signOutOptionsSchema } from "@lpshanley/oidc-start-core/models";
+import { sanitizeReturnPath } from "@lpshanley/oidc-start-core/helpers";
+import { signInOptionsSchema, signOutOptionsSchema } from "@lpshanley/oidc-start-core/models";
 
 // Server functions after WorkOS's server-functions.ts; bodies load lazily so
 // server code stays out of the client bundle.

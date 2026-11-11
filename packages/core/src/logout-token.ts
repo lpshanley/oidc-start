@@ -1,4 +1,5 @@
 import { errors, type JWTPayload } from "jose";
+import { z } from "zod";
 
 // OpenID Connect Back-Channel Logout 1.0, section 2.6: the checks that apply
 // after the signature, issuer, and audience have been verified.
@@ -30,33 +31,28 @@ export function isInvalidLogoutToken(error: unknown) {
 /** Which sign-ins a logout token ends: one provider session, or all of a user's. */
 export type LogoutTarget = ({ sid: string; sub?: string } | { sub: string; sid?: never }) & { issuedAt: number; expiresAt: number; jti: string };
 
+const NO_LOGOUT_EVENT = "The token carries no back-channel logout event";
+const NO_TOKEN_ID = "The logout token has no token ID";
+const logoutClaims = z.object({
+	events: z.object(
+		{ [BACKCHANNEL_LOGOUT_EVENT]: z.looseObject({}, { error: NO_LOGOUT_EVENT }) },
+		{ error: NO_LOGOUT_EVENT },
+	),
+	iat: z.number({ error: "The token has no issued-at time" }),
+	jti: z.string({ error: NO_TOKEN_ID }).regex(/\S/, NO_TOKEN_ID),
+	exp: z.number({ error: "Missing expiry" }),
+	sid: z.string().optional().catch(undefined),
+	sub: z.string().optional().catch(undefined),
+});
+
 export function logoutTarget(payload: JWTPayload): LogoutTarget {
-	const events = payload.events;
-	if (
-		typeof events !== "object" ||
-		events === null ||
-		!(BACKCHANNEL_LOGOUT_EVENT in events) ||
-		typeof events[BACKCHANNEL_LOGOUT_EVENT] !== "object" ||
-		events[BACKCHANNEL_LOGOUT_EVENT] === null ||
-		Array.isArray(events[BACKCHANNEL_LOGOUT_EVENT])
-	) {
-		throw new LogoutTokenError(
-			"The token carries no back-channel logout event",
-		);
-	}
 	if ("nonce" in payload) {
 		throw new LogoutTokenError("A logout token must not carry a nonce");
 	}
-	if (typeof payload.iat !== "number") {
-		throw new LogoutTokenError("The token has no issued-at time");
-	}
-	if (typeof payload.jti !== "string" || !payload.jti.trim()) {
-		throw new LogoutTokenError("The logout token has no token ID");
-	}
-	if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) throw new LogoutTokenError("Missing expiry");
-	const event = { issuedAt: payload.iat, expiresAt: payload.exp, jti: payload.jti };
-	const sid = typeof payload.sid === "string" ? payload.sid : "";
-	const sub = typeof payload.sub === "string" ? payload.sub : "";
+	const claims = logoutClaims.safeParse(payload);
+	if (!claims.success) throw new LogoutTokenError(claims.error.issues[0].message);
+	const { iat, exp, jti, sid, sub } = claims.data;
+	const event = { issuedAt: iat, expiresAt: exp, jti };
 	if (sid) return { ...event, sid, ...(sub && { sub }) };
 	if (sub) return { ...event, sub };
 	throw new LogoutTokenError("The token names neither a session nor a user");

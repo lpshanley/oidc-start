@@ -20,6 +20,10 @@
       "types": "./dist/models.d.ts",
       "import": "./dist/models.js"
     },
+    "./helpers": {
+      "types": "./dist/helpers.d.ts",
+      "import": "./dist/helpers.js"
+    },
     "./provider": {
       "types": "./dist/provider.d.ts",
       "import": "./dist/provider.js"

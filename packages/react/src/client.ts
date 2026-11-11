@@ -1,6 +1,7 @@
 import { createContext, createElement, Fragment, useContext, type ReactElement, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { hasRole, type AuthSession, type SignInOptions, type SignOutOptions } from "@lpshanley/oidc-start-core/models";
+import { hasRole } from "@lpshanley/oidc-start-core/helpers";
+import type { AuthSession, SignInOptions, SignOutOptions } from "@lpshanley/oidc-start-core/models";
 import { getSignInUrl, signOut } from "./functions.js";
 
 const AuthContext = createContext<AuthSession | undefined>(undefined);
