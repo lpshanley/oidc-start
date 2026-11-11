@@ -35,6 +35,12 @@ const PERSONAL = new Set([
 const CONTACT = new Set(["emails", "phoneNumbers", "ims", "photos", "manager"]);
 const SECRET = new Set(["password"]);
 
+// SCIM attribute names are case-insensitive (RFC 7643 section 2.1), so the sets are compared in lower case.
+const lower = (names: Set<string>) => new Set([...names].map((name) => name.toLowerCase()));
+const personal = lower(PERSONAL);
+const contacts = lower(CONTACT);
+const secrets = lower(SECRET);
+
 /** Replaces personal values with stable placeholders, so that lookups still match creates. */
 function createScrubber() {
 	const seen = new Map<string, string>();
@@ -48,11 +54,11 @@ function createScrubber() {
 		if (typeof value === "object" && value !== null)
 			return Object.fromEntries(
 				Object.entries(value)
-					.filter(([k]) => !SECRET.has(k))
-					.map(([k, v]) => [k, scrub(v, k, contact || CONTACT.has(k))]),
+					.filter(([k]) => !secrets.has(k.toLowerCase()))
+					.map(([k, v]) => [k, scrub(v, k, contact || contacts.has(k.toLowerCase()))]),
 			);
 		if (typeof value !== "string" || !value) return value;
-		return PERSONAL.has(key ?? "") || (contact && key === "value") ? placeholder(value) : value;
+		return personal.has((key ?? "").toLowerCase()) || (contact && key?.toLowerCase() === "value") ? placeholder(value) : value;
 	};
 	return {
 		scrub: (value: unknown) => scrub(value),

@@ -44,3 +44,16 @@ test("a recording drops credentials and notices a changed status", async () => {
 	const wrong = await replayTraffic(instance(), [{ ...exchanges[1], status: 200 }]);
 	expect(wrong.map((m) => m.status)).toEqual([404]);
 });
+
+test("a recording scrubs attribute names whatever their case", async () => {
+	const exchanges: ScimExchange[] = [];
+	const scim = recordTraffic(instance(), { onExchange: (e) => exchanges.push(e) });
+	const idp = createTestProvider(scim, { dialect: "okta" });
+	await idp.send("POST", "/Users", {
+		USERNAME: "a@x.test",
+		Password: "hunter2",
+		Emails: [{ Value: "a@x.test" }],
+		"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": { Manager: { value: "boss@x.test" } },
+	});
+	expect(JSON.stringify(exchanges)).not.toMatch(/hunter2|a@x|boss@x/);
+});
