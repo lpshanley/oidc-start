@@ -452,7 +452,9 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 
 		/** OIDC Back-Channel Logout §§2.6–2.8: validate, commit, then acknowledge. */
 		async backchannelLogout(request: Request, context?: OidcCallContext): Promise<{ status: 200 | 400 }> {
-			const token = await readLogoutToken(request, { signal: context?.signal });
+			const token = await readLogoutToken(request, {
+				signal: context?.signal ? AbortSignal.any([context.signal, request.signal]) : request.signal,
+			});
 			if (token === undefined) return { status: 400 };
 			let target: LogoutTarget;
 			try {
