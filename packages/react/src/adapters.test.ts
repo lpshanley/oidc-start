@@ -38,7 +38,8 @@ const core = {
 	report: vi.fn(),
 };
 const createOidcCore = vi.fn(() => core);
-vi.mock("@lpshanley/oidc-start-core", () => ({
+vi.mock("@lpshanley/oidc-start-core", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@lpshanley/oidc-start-core")>()),
 	createOidcCore,
 	SessionAccessDeniedError: class SessionAccessDeniedError extends Error {},
 }));
@@ -351,6 +352,18 @@ describe("route handlers", () => {
 		);
 		expect(appended).toEqual(["s=; Max-Age=0"]);
 	});
+});
+
+test("sign-out reads everywhere from a small form and ignores an oversized one", async () => {
+	context();
+	core.signOut.mockResolvedValue({ location: "https://idp.test/logout", setCookies: [] });
+	const form = { "content-type": "application/x-www-form-urlencoded" };
+	await routes.signOutRoute(new Request("https://sage.test/logout", { method: "POST", headers: form, body: "everywhere=1" }));
+	expect(core.signOut).toHaveBeenLastCalledWith(expect.any(Request), expect.any(Map), null, { correlationId: "req-1" }, { everywhere: true });
+	await routes.signOutRoute(
+		new Request("https://sage.test/logout", { method: "POST", headers: form, body: `everywhere=1&pad=${"a".repeat(8192)}` }),
+	);
+	expect(core.signOut).toHaveBeenLastCalledWith(expect.any(Request), expect.any(Map), null, { correlationId: "req-1" }, { everywhere: false });
 });
 
 test("both sign-out entry points return 503 and preserve cookies when revocation fails", async () => {

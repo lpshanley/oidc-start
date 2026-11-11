@@ -1,6 +1,6 @@
 import { endSession } from "./sign-out.server.js";
 import { getOidcContext } from "./context.js";
-import type { CallbackErrorReason } from "@lpshanley/oidc-start-core";
+import { readFormBody, type CallbackErrorReason } from "@lpshanley/oidc-start-core";
 
 import type { SignInOptions, SignOutOptions } from "@lpshanley/oidc-start-core/models";
 
@@ -110,7 +110,8 @@ export async function signOutRoute(request: Request, options: SignOutOptions = {
 			headers: { Allow: "POST", "Cache-Control": "no-store" },
 		});
 	}
-	const form = await request.formData().catch(() => undefined);
+	// Only `everywhere` is read, so a small, time-limited form read is enough.
+	const form = await readFormBody(request, { maxBytes: 4 * 1024, signal: request.signal });
 	const result = await endSession({ ...options, everywhere: options.everywhere || form?.get("everywhere") === "1" });
 	return result instanceof Response ? result : redirectTo(result, 303);
 }

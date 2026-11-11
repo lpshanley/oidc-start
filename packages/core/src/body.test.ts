@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { MAX_LOGOUT_BODY_BYTES, MAX_LOGOUT_TOKEN_LENGTH, readLogoutToken } from "./body.js";
+import { MAX_LOGOUT_BODY_BYTES, MAX_LOGOUT_TOKEN_LENGTH, readFormBody, readLogoutToken } from "./body.js";
 
 const form = "application/x-www-form-urlencoded";
 const post = (body: BodyInit | null, headers: Record<string, string> = { "content-type": form }) =>
@@ -104,5 +104,26 @@ describe("readLogoutToken", () => {
 	test("does not start on an already-aborted request", async () => {
 		const { body } = stalled();
 		expect(await readLogoutToken(post(body), { signal: AbortSignal.abort(), timeoutMs: 10_000 })).toBeUndefined();
+	});
+});
+
+describe("readFormBody", () => {
+	test("reads the fields of a form body", async () => {
+		expect((await readFormBody(post("everywhere=1&x=2"), { maxBytes: 64 }))?.get("everywhere")).toBe("1");
+	});
+
+	test("ignores a body that is not form-encoded", async () => {
+		expect(await readFormBody(post("everywhere=1", { "content-type": "text/plain" }))).toBeUndefined();
+	});
+
+	test("stops reading an endless body at the limit", async () => {
+		const { state, body } = endless();
+		expect(await readFormBody(post(body), { maxBytes: 4096 })).toBeUndefined();
+		expect(state.pulled).toBeLessThan(64 * 1024);
+	});
+
+	test("gives up on a body that stalls", async () => {
+		const body = new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}) });
+		expect(await readFormBody(post(body), { timeoutMs: 20 })).toBeUndefined();
 	});
 });
