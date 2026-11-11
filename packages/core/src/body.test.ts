@@ -72,4 +72,37 @@ describe("readLogoutToken", () => {
 		expect(await readLogoutToken(request)).toBeUndefined();
 		expect(state.pulled).toBeLessThanOrEqual(MAX_LOGOUT_BODY_BYTES + 4096);
 	});
+
+	/** One valid fragment, then silence: a slow client. */
+	function stalled() {
+		let cancelled = false;
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode("logout_token="));
+			},
+			cancel() {
+				cancelled = true;
+			},
+		});
+		return { body, wasCancelled: () => cancelled };
+	}
+
+	test("gives up on a body that stalls past the timeout", async () => {
+		const { body, wasCancelled } = stalled();
+		expect(await readLogoutToken(post(body), { timeoutMs: 20 })).toBeUndefined();
+		expect(wasCancelled()).toBe(true);
+	});
+
+	test("gives up when the request is aborted", async () => {
+		const { body, wasCancelled } = stalled();
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 10);
+		expect(await readLogoutToken(post(body), { signal: controller.signal, timeoutMs: 10_000 })).toBeUndefined();
+		expect(wasCancelled()).toBe(true);
+	});
+
+	test("does not start on an already-aborted request", async () => {
+		const { body } = stalled();
+		expect(await readLogoutToken(post(body), { signal: AbortSignal.abort(), timeoutMs: 10_000 })).toBeUndefined();
+	});
 });
