@@ -40,7 +40,7 @@ export type ScimOptions<TConnection, TUser extends ScimUser, TTransaction> = Sci
 	 * 400 mutability, except that a deactivation still goes through.
 	 */
 	externalId?: "mutable" | "fixed";
-	/** A refused request can leave a leaver with access, so report these. Must not throw. */
+	/** A refused request can leave a leaver with access, so report these. A throw or rejection here is ignored. */
 	onProblem?(problem: ScimProblem): void;
 };
 
@@ -97,7 +97,16 @@ export function createScim<TConnection, TUser extends ScimUser = ScimUser, TTran
 	options: ScimOptions<TConnection, TUser, TTransaction>,
 ) {
 	const basePath = (options.basePath ?? "/scim/v2").replace(/\/+$/, "");
-	const report = (problem: ScimProblem) => options.onProblem?.(problem);
+	// A monitoring callback must never turn a protocol answer, or a committed
+	// write, into an error. Sync throws and async rejections are both dropped.
+	const report = (problem: ScimProblem) => {
+		try {
+			const result: unknown = options.onProblem?.(problem);
+			if (result instanceof Promise) result.catch(() => {});
+		} catch {
+			// Nothing safe to do: the reporter is the only channel for this.
+		}
+	};
 	const forConnection = (connection: TConnection, method = "direct") =>
 		createOperations(
 			{

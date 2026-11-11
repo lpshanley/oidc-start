@@ -235,6 +235,52 @@ test("a hook failing after commit does not fail the request", async () => {
 	expect(problems).toHaveBeenCalledWith(expect.objectContaining({ kind: "after-commit", method: "POST" }));
 });
 
+test("a throwing onProblem cannot fail a write that already committed", async () => {
+	const { scim } = setup({
+		onCommitted: () => {
+			throw new Error("cache down");
+		},
+		onProblem: () => {
+			throw new Error("monitoring down");
+		},
+	});
+	const idp = createTestProvider(scim, { dialect: "okta" });
+	const user = await idp.createUser({ userName: "a@x.test" });
+	expect(user.userName).toBe("a@x.test");
+	expect((await idp.getUser(user.id)).status).toBe(200);
+});
+
+test("handle never rejects when onProblem throws or rejects", async () => {
+	const unreachable = new Proxy(
+		{},
+		{
+			get: () => async () => {
+				throw new Error("connection refused");
+			},
+		},
+	);
+	for (const onProblem of [
+		() => {
+			throw new Error("monitoring down");
+		},
+		async () => {
+			throw new Error("monitoring down");
+		},
+	]) {
+		const { scim } = setup({ onProblem });
+		const idp = createTestProvider(scim, { dialect: "okta" });
+		await idp.createUser({ userName: "a@x.test" });
+		const refused = await idp.send("POST", "/Users", { schemas: [USER], userName: "A@X.TEST" });
+		expect(refused.status).toBe(409);
+
+		const down = setup({
+			onProblem,
+			adapter: { read: () => unreachable as never, transaction: async () => { throw new Error("connection refused"); } },
+		});
+		expect((await get(down.scim, "/Users/u1")).status).toBe(503);
+	}
+});
+
 test("group PATCH applies operations in order, in one transaction", async () => {
 	const { scim } = setup();
 	const idp = createTestProvider(scim, { dialect: "okta" });
