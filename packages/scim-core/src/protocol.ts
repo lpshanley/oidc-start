@@ -215,7 +215,8 @@ function writeExtension(user: User, { attribute, sub }: Target, value: unknown) 
 		if (sub) next = text.parse(value) === undefined ? without(manager, sub) : known(MANAGER_KEYS, { ...manager, [sub]: text.parse(value) });
 		else {
 			// Sub-attributes the value leaves out stay as they were (RFC 7644 §3.5.2.3).
-			const given = typeof value === "string" ? { value } : jsonObject.safeParse(value).data;
+			// Entra clears a manager by replacing it with an empty string.
+			const given = typeof value === "string" ? (value.trim() ? { value } : undefined) : jsonObject.safeParse(value).data;
 			next = given ? { ...manager, ...known(MANAGER_KEYS, given) } : undefined;
 		}
 		if (next && !Object.keys(next).length) next = undefined;

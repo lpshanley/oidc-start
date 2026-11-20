@@ -321,6 +321,9 @@ test("a complex value merges, and unknown sub-attributes are never stored", () =
 	expect(merged.attributes[ENTERPRISE]).toEqual({ manager: { value: "m-1", $ref: "/Users/m-1", displayName: "Boss" } });
 	const cleared = patchUser(merged, { Operations: [{ op: "replace", path: `${ENTERPRISE}:manager`, value: null }] });
 	expect(cleared.attributes).toEqual({ phoneNumbers: [{ type: "work", value: "1" }] });
+	// Entra clears a manager with an empty string, where the RFC would send a remove.
+	const blanked = patchUser(merged, { Operations: [{ op: "replace", path: `${ENTERPRISE}:manager`, value: "" }] });
+	expect(blanked.attributes).toEqual({ phoneNumbers: [{ type: "work", value: "1" }] });
 });
 
 test("a count that is not a number falls back to the default", () => {
