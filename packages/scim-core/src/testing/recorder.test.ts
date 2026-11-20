@@ -58,6 +58,42 @@ test("a recording scrubs attribute names whatever their case", async () => {
 	expect(JSON.stringify(exchanges)).not.toMatch(/hunter2|a@x|boss@x/);
 });
 
+test("a recording scrubs PATCH values that a path addresses", async () => {
+	const exchanges: ScimExchange[] = [];
+	const scim = recordTraffic(instance(), { onExchange: (e) => exchanges.push(e) });
+	const idp = createTestProvider(scim, { dialect: "entra" });
+	const created = await idp.send("POST", "/Users", { userName: "a@x.test", externalId: "alias.a" });
+	const patched = await idp.send("PATCH", `/Users/${created.body.id}`, {
+		schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+		Operations: [
+			{ op: "Replace", path: "userName", value: "renamed@x.test" },
+			{ op: "Replace", path: "name.familyName", value: "Lovelace" },
+			{ op: "Add", path: 'phoneNumbers[type eq "work"].value', value: "555-0100" },
+			{ op: "Add", path: 'addresses[type eq "work"].locality', value: "Testville" },
+			{ op: "Add", path: "emails", value: [{ type: "work", value: "work@x.test" }] },
+			{ op: "Add", path: "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager", value: "boss-id" },
+			{ op: "Replace", path: "Password", value: "hunter2" },
+			{ op: "Replace", path: "externalId", value: "alias.renamed" },
+			{ op: "Replace", path: "active", value: "False" },
+			{
+				op: "replace",
+				value: {
+					"name.givenName": "Augusta",
+					"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:department": "Engines",
+					"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager": "other-boss",
+				},
+			},
+		],
+	});
+	expect(patched.status).toBe(200);
+	const text = JSON.stringify(exchanges);
+	expect(text).not.toMatch(/x\.test|Lovelace|555|Testville|boss|hunter2|alias|Augusta|Engines/);
+	// What is not personal stays, so the recording still replays.
+	expect(text).toContain('"value":"False"');
+	expect(text).toContain('"type":"work"');
+	expect(await replayTraffic(instance(), exchanges)).toEqual([]);
+});
+
 test("a recording never reads the body of a request that fails authentication", async () => {
 	const exchanges: ScimExchange[] = [];
 	const options: ScimOptions<string, ScimUser, undefined> = {

@@ -55,6 +55,130 @@ test.each(["mutable", "fixed"] as const)("authentik 2026.8.5 traffic replays wit
 	]);
 });
 
+// Captured from a Microsoft Entra ID Free tenant with a non-gallery app and its
+// default mappings, without the aadOptscim062020 flag, using Provision on
+// demand: the credential test, two users, a rename that changes userName and
+// externalId and adds phones, a city and a manager, a disabled and re-enabled
+// account, and an unassignment. Every update is a PATCH with a path and a
+// capitalized op, and `active` arrives as the string "False" or "True".
+test("Entra default-mode traffic replays", async () => {
+	const changes: ScimChange[] = [];
+	const options: ScimOptions<string, ScimUser, undefined> = {
+		adapter: createMemoryAdapter<string>(),
+		authenticate: async () => "acme",
+		onChange: async (change) => void changes.push(change),
+	};
+	const scim = createScim(options);
+	const exchanges = recording("entra-default-2026-11");
+	expect(exchanges.filter((e) => e.method === "PUT")).toEqual([]);
+	expect(await replayTraffic(scim, exchanges)).toEqual([]);
+
+	const users = await scim.forConnection("acme").users.list({}, 0, 100);
+	// Unassigning someone deactivates them, the same PATCH as disabling their account.
+	expect(users.items.map((u) => u.active)).toEqual([true, false]);
+	expect(users.items[0].attributes).toMatchObject({
+		phoneNumbers: [{ type: "work" }, { type: "mobile" }],
+		addresses: [{ type: "work" }],
+		"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": { manager: { value: "person-22" } },
+	});
+
+	// The mail alias is the default externalId, so a rename changes it.
+	expect(changes.filter((c) => "previousExternalId" in c)).toHaveLength(1);
+	expect(changes.map((c) => c.type)).toEqual([
+		"user.created",
+		"user.created",
+		"user.updated",
+		"user.updated",
+		"user.deactivated",
+		"user.reactivated",
+		"user.deactivated",
+	]);
+});
+
+// With a fixed externalId the rename is refused whole, so the new userName, the
+// phones and the city are lost with it. Entra sends the manager separately.
+test("Entra's rename is the one request a fixed externalId refuses", async () => {
+	const options: ScimOptions<string, ScimUser, undefined> = {
+		adapter: createMemoryAdapter<string>(),
+		authenticate: async () => "acme",
+		externalId: "fixed",
+	};
+	const mismatches = await replayTraffic(createScim(options), recording("entra-default-2026-11"));
+	expect(mismatches.map((m) => [m.exchange.method, m.status])).toEqual([["PATCH", 400]]);
+	expect(JSON.stringify(mismatches[0].exchange.body)).toContain('"path":"externalId"');
+});
+
+// The same tenant and lifecycle with ?aadOptscim062020 on the tenant URL. The op
+// is lower case and `active` is a boolean. A rename is one PATCH: replaces with
+// a path for the phones and the city, then a no-path replace whose keys are
+// paths themselves, such as "name.familyName". The manager is still a string.
+test("Entra aadOptscim062020 traffic replays", async () => {
+	const changes: ScimChange[] = [];
+	const options: ScimOptions<string, ScimUser, undefined> = {
+		adapter: createMemoryAdapter<string>(),
+		authenticate: async () => "acme",
+		onChange: async (change) => void changes.push(change),
+	};
+	const scim = createScim(options);
+	const exchanges = recording("entra-aadoptscim062020-2026-11");
+	const rename = exchanges.find((e) => JSON.stringify(e.body ?? "").includes('"name.familyName"'));
+	expect(rename?.status).toBe(200);
+	expect(await replayTraffic(scim, exchanges)).toEqual([]);
+
+	const users = await scim.forConnection("acme").users.list({}, 0, 100);
+	expect(users.items.map((u) => u.active)).toEqual([false, true]);
+	// The dotted keys of the no-path replace are applied, not dropped as unknown attributes.
+	expect(users.items[1].name).toMatchObject({ familyName: "person-24", formatted: "person-21" });
+	expect(users.items[1].attributes).toMatchObject({
+		phoneNumbers: [{ type: "work" }, { type: "mobile" }],
+		addresses: [{ type: "work" }],
+		"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": { manager: { value: "person-25" } },
+	});
+
+	expect(changes.filter((c) => "previousExternalId" in c)).toHaveLength(1);
+	expect(changes.map((c) => c.type)).toEqual([
+		"user.created",
+		"user.created",
+		"user.updated",
+		"user.updated",
+		"user.deactivated",
+		"user.reactivated",
+		"user.deactivated",
+	]);
+});
+
+// The scheduled cycles that followed, on the same connection. The harness was
+// restarted first, so one assigned user's id is unknown: the GET answers 404 and
+// Entra looks them up by userName and creates them again. It also clears a
+// manager with an empty string before setting it. A user deleted in Entra
+// arrives as a no-path replace of `active` and a new userName, and only a
+// permanent delete sends DELETE.
+test("Entra's scheduled cycles replay after the on-demand pushes", async () => {
+	const changes: ScimChange[] = [];
+	const options: ScimOptions<string, ScimUser, undefined> = {
+		adapter: createMemoryAdapter<string>(),
+		authenticate: async () => "acme",
+		onChange: async (change) => void changes.push(change),
+	};
+	const scim = createScim(options);
+	const before = recording("entra-aadoptscim062020-2026-11");
+	const cycles = recording("entra-aadoptscim062020-cycle-2026-11");
+	expect(cycles.filter((e) => e.status === 404).map((e) => e.method)).toEqual(["GET"]);
+	expect(cycles.at(-1)).toMatchObject({ method: "DELETE", status: 204 });
+	expect(await replayTraffic(scim, [...before, ...cycles])).toEqual([]);
+
+	const users = await scim.forConnection("acme").users.list({}, 0, 100);
+	expect(users.items.map((u) => u.active)).toEqual([false, true]);
+	expect(changes.slice(7).map((c) => c.type)).toEqual([
+		"user.created",
+		"user.updated",
+		"user.updated",
+		"user.updated",
+		"user.deactivated",
+		"user.deleted",
+	]);
+});
+
 // Captured from an Okta trial org with the catalog's "SCIM 2.0 Test App (OAuth
 // Bearer Token)" and its default mappings: the credential test, assignments, a
 // profile edit, an unassignment and reassignment, a group push with member

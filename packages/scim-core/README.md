@@ -6,7 +6,7 @@ The package owns the protocol: validation, PATCH, filters, paging, discovery and
 
 ## Status
 
-This is an early release. It covers Users, Groups and discovery. It was extracted from a production app whose SCIM endpoint has received authentik pushes, and the package itself has handled live pushes from a disposable authentik 2026.8.5 and from an Okta trial org, using the catalog's SCIM 2.0 Test App, a classic App Integration Wizard app and an app built in the newer Okta Integration Wizard. That traffic is [kept in the repository](https://github.com/lpshanley/oidc-start/tree/main/packages/scim-core/recordings) and replayed in the tests. Failures were tested too: Okta's and authentik's reactions to 503 and 409 answers are recorded below. **No real Entra push has been tested**, so try it before relying on it.
+This is an early release. It covers Users, Groups and discovery. It was extracted from a production app whose SCIM endpoint has received authentik pushes, and the package itself has handled live pushes from a disposable authentik 2026.8.5 and from an Okta trial org, using the catalog's SCIM 2.0 Test App, a classic App Integration Wizard app and an app built in the newer Okta Integration Wizard. That traffic is [kept in the repository](https://github.com/lpshanley/oidc-start/tree/main/packages/scim-core/recordings) and replayed in the tests. It has also handled Provision on demand pushes from a Microsoft Entra ID Free tenant, with and without the `aadOptscim062020` flag, and that tenant's scheduled cycles and deletes with the flag. Failures were tested too: Okta's and authentik's reactions to 503 and 409 answers are recorded below. **Entra's group pushes and its reaction to failures have not been tested**, so try those before relying on them.
 
 | Supported | Not supported yet |
 | --- | --- |
@@ -127,7 +127,7 @@ test("a leaver loses access", async () => {
 });
 ```
 
-`createMemoryAdapter()` is a single-process adapter for trying the package and for fast tests. The `okta`, `okta-wizard`, `entra` and `authentik` dialects are modelled on vendor documentation and that app's records, not captured traffic, so they show your app handles those shapes, not that a real push works. The repository's [`recordings/`](https://github.com/lpshanley/oidc-start/tree/main/packages/scim-core/recordings) folder holds captured traffic from authentik and from three Okta app types. All three Okta apps update a profile with a GET and a PUT. The test app and the newer wizard app deactivate and reactivate with a no-path PATCH and change groups with PATCH, and the classic wizard app uses PUT for all of those. `okta` is an OIN integration, and `okta-wizard` is an App Integration Wizard app, which updates with PUT.
+`createMemoryAdapter()` is a single-process adapter for trying the package and for fast tests. The `okta`, `okta-wizard`, `entra` and `authentik` dialects are modelled on vendor documentation and that app's records, not captured traffic, so they show your app handles those shapes, not that a real push works. The repository's [`recordings/`](https://github.com/lpshanley/oidc-start/tree/main/packages/scim-core/recordings) folder holds captured traffic from authentik, from Entra and from three Okta app types. All three Okta apps update a profile with a GET and a PUT. The test app and the newer wizard app deactivate and reactivate with a no-path PATCH and change groups with PATCH, and the classic wizard app uses PUT for all of those. `okta` is an OIN integration, and `okta-wizard` is an App Integration Wizard app, which updates with PUT.
 
 ### When a request fails
 
@@ -153,9 +153,31 @@ Observed against authentik 2026.8.5 ([`recordings/authentik-2026.8.5.jsonl`](htt
 - **The default full sync runs every four hours** (`49 */4 * * *`), not every hour. It sends a `PUT` for every user, and the package skips the ones that changed nothing.
 - **Volume:** 300 new users synced in under two minutes, listing paged correctly at 100 a time, and a full sync of 305 users finished in under a minute with no errors. Authentik itself left two of the 300 unpushed until the next full sync, with no error in either system, so a user can be missing for up to four hours.
 
+### Entra
+
+Observed against a Microsoft Entra ID Free tenant with a non-gallery app and default mappings, using Provision on demand, first without the `aadOptscim062020` flag ([`recordings/entra-default-2026-11.jsonl`](https://github.com/lpshanley/oidc-start/blob/main/packages/scim-core/recordings/entra-default-2026-11.jsonl)) and then with it ([`recordings/entra-aadoptscim062020-2026-11.jsonl`](https://github.com/lpshanley/oidc-start/blob/main/packages/scim-core/recordings/entra-aadoptscim062020-2026-11.jsonl)):
+
+- **Without the flag, every update is a PATCH with a path.** The `op` is capitalized, and `active` arrives as the string `"False"` or `"True"`. A create sends `active` as a boolean.
+- **With the flag, the `op` is lower case and `active` is a boolean.** Simple attributes arrive in one no-path `replace` whose keys are paths themselves, such as `"name.familyName"`. Phones and the city still have a path.
+- **Changing the tenant URL clears the secret token,** so adding the flag to a working connection answers 401 until the token is entered again.
+- **The mail alias is `externalId`,** and in both modes a rename replaces it in the same PATCH as `userName`, the name and any new phone or city. With `externalId: "fixed"` that whole request answers `400 mutability`, so the rename is lost with it.
+- **A manager arrives in its own PATCH,** as a string at `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager`. The value is the manager's `id` in your app, so the manager has to be provisioned first.
+- **Unassigning someone deactivates them.** It is the same PATCH as disabling their account, and nothing is deleted.
+- **A cleared attribute was not sent.** Emptying the department in Entra changed nothing in the app, in either mode or in the scheduled cycles that followed.
+- **It looks before it writes.** Each push starts with a `userName eq` lookup for a random value, then one for the real `userName` before a create, or a GET by `id` before an update.
+- **The Free tier assigns users only.** Assigning a group to the app needs a paid plan.
+
+Its scheduled cycles, with the flag ([`recordings/entra-aadoptscim062020-cycle-2026-11.jsonl`](https://github.com/lpshanley/oidc-start/blob/main/packages/scim-core/recordings/entra-aadoptscim062020-cycle-2026-11.jsonl)):
+
+- **Deleting a user in Entra deactivates them and renames them.** About 19 minutes after the delete, one no-path PATCH set `active` to `false` and replaced `userName`. The person stays in your app, inactive, under a `userName` they never had.
+- **Only a permanent delete sends `DELETE`.** It came about 20 minutes after the user was removed from Entra's deleted users, which otherwise happens after 30 days.
+- **A 404 for a known user makes Entra create them again.** It looks them up by `userName` and sends a new POST, so a 404 must mean the user is gone.
+- **A manager is cleared with an empty string,** as a `replace` at the manager path, where RFC 7644 would send a `remove`. The package clears it.
+- **A create in a cycle carries nulls,** such as `"streetAddress": null` inside an address. They are treated as omitted.
+
 ### Capture real traffic
 
-`recordTraffic` wraps an instance and reports each exchange. Headers are never kept, passwords are dropped, and names, emails and filter values become placeholders. `replayTraffic` sends a recording to a fresh instance and returns any exchange whose status changed, so a provider's real requests can become a regression test:
+`recordTraffic` wraps an instance and reports each exchange. Headers are never kept, passwords are dropped, and names, emails, `externalId` and filter values become placeholders, including values a PATCH addresses by path. `replayTraffic` sends a recording to a fresh instance and returns any exchange whose status changed, so a provider's real requests can become a regression test:
 
 ```ts
 const recording = readFileSync("okta.jsonl", "utf8").trim().split("\n").map((line) => JSON.parse(line));
