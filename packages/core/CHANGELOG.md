@@ -1,5 +1,11 @@
 # @lpshanley/oidc-start-core
 
+## 0.7.1
+
+### Patch Changes
+
+- f170d6d: The sign-out route reads its form through a size-limited, time-limited reader instead of `request.formData()`. Core now exports `readFormBody` for this.
+
 ## 0.7.0
 
 ### Minor Changes

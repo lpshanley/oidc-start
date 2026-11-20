@@ -1,5 +1,14 @@
 # @lpshanley/scim-core
 
+## 0.7.1
+
+### Patch Changes
+
+- d2345b6: A PATCH that replaces the enterprise `manager` with an empty string now clears it, as Microsoft Entra sends when a manager is removed. It used to keep the previous manager.
+- 454f07e: `recordTraffic` no longer reads a request body before the handler has answered, skips requests that fail authentication, keeps at most 1 MiB per body, and can no longer change a response when recording fails.
+- c1879f5: `recordTraffic` now matches attribute names without regard to case, as SCIM does, so a `Password`, `Emails` or `Manager` property is scrubbed like its lower-camel-case form.
+- b509eec: `recordTraffic` now scrubs PATCH values that are addressed by a path, such as `name.familyName` or `phoneNumbers[type eq "work"].value`, whether the path is the operation's `path` or a key of a no-path value, as Microsoft Entra sends them. It also replaces `externalId`, which Entra fills with a mail alias. A recording made from Entra traffic with an earlier version kept those values.
+
 ## 0.7.0
 
 ### Patch Changes

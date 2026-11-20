@@ -1,5 +1,13 @@
 # @lpshanley/oidc-start-react
 
+## 0.7.1
+
+### Patch Changes
+
+- f170d6d: The sign-out route reads its form through a size-limited, time-limited reader instead of `request.formData()`. Core now exports `readFormBody` for this.
+- Updated dependencies [f170d6d]
+  - @lpshanley/oidc-start-core@0.7.1
+
 ## 0.7.0
 
 ### Minor Changes
