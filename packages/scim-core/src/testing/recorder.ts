@@ -10,6 +10,8 @@ export type ScimExchange = {
 type Handler = { handle(request: Request): Promise<Response> };
 
 const PERSONAL = new Set([
+	// Entra sends a mail alias as externalId by default.
+	"externalId",
 	"userName",
 	"displayName",
 	"display",
@@ -41,6 +43,22 @@ const personal = lower(PERSONAL);
 const contacts = lower(CONTACT);
 const secrets = lower(SECRET);
 
+/** What a PATCH path such as `phoneNumbers[type eq "work"].value` or a URN ending in `:manager` points at. */
+function pathTarget(path: string) {
+	const names = path
+		.replace(/\[[^\]]*\]/g, "")
+		.split(/[.:]/)
+		.map((name) => name.toLowerCase());
+	const key = names.at(-1) ?? "";
+	return {
+		key,
+		contact: names.some((name) => contacts.has(name)),
+		/** The path ends on the contact attribute itself, so a string value is that contact's value. */
+		bare: contacts.has(key),
+		secret: names.some((name) => secrets.has(name)),
+	};
+}
+
 /** Replaces personal values with stable placeholders, so that lookups still match creates. */
 function createScrubber() {
 	const seen = new Map<string, string>();
@@ -51,12 +69,21 @@ function createScrubber() {
 	};
 	const scrub = (value: unknown, key?: string, contact = false): unknown => {
 		if (Array.isArray(value)) return value.map((v) => scrub(v, key, contact));
-		if (typeof value === "object" && value !== null)
+		if (typeof value === "object" && value !== null) {
+			// A PATCH operation with a path names its attribute there, not in a key, as Entra sends it.
+			const target = "path" in value && typeof value.path === "string" ? pathTarget(value.path) : undefined;
 			return Object.fromEntries(
 				Object.entries(value)
-					.filter(([k]) => !secrets.has(k.toLowerCase()))
-					.map(([k, v]) => [k, scrub(v, k, contact || contacts.has(k.toLowerCase()))]),
+					.filter(([k]) => !pathTarget(k).secret)
+					.map(([k, v]) => {
+						// The operation has to stay whole to replay, so a secret's value is blanked, not dropped.
+						if (target?.secret && k.toLowerCase() === "value") return [k, "redacted"];
+						// A key can be a path too: Entra's no-path PATCH sends "name.familyName".
+						const named = target && k.toLowerCase() === "value" ? target : pathTarget(k);
+						return [k, scrub(v, named.bare && typeof v === "string" ? "value" : named.key, contact || named.contact)];
+					}),
 			);
+		}
 		if (typeof value !== "string" || !value) return value;
 		return personal.has((key ?? "").toLowerCase()) || (contact && key?.toLowerCase() === "value") ? placeholder(value) : value;
 	};
