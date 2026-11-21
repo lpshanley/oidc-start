@@ -1,3 +1,4 @@
+import { MAX_BODY_BYTES, readBody } from "./body.js";
 import type { ScimAdapter } from "./adapter.js";
 import { ScimError } from "./errors.js";
 import { createOperations, type ScimHooks } from "./operations.js";
@@ -6,7 +7,6 @@ import { listResponse, project, resourceTypes, schemas, serviceProviderConfig, t
 import type { ScimUser } from "./types.js";
 
 const TYPE = "application/scim+json";
-const MAX_BODY_BYTES = 1 << 20;
 
 /** A request that was refused, or that failed for a reason the provider can retry. */
 export type ScimProblem = {
@@ -50,24 +50,12 @@ const json = (body: unknown, status = 200, headers: HeadersInit = {}) =>
 		headers: { "content-type": TYPE, "cache-control": "no-store", ...headers },
 	});
 
-async function text(request: Request) {
-	const declared = Number(request.headers.get("content-length") ?? 0);
-	if (declared > MAX_BODY_BYTES) throw new ScimError(413);
-	if (!request.body) return "";
-	const chunks: Uint8Array[] = [];
-	let size = 0;
-	for await (const chunk of request.body as unknown as AsyncIterable<Uint8Array>) {
-		size += chunk.byteLength;
-		if (size > MAX_BODY_BYTES) throw new ScimError(413);
-		chunks.push(chunk);
-	}
-	return Buffer.concat(chunks).toString("utf8");
-}
-
 async function body(request: Request) {
 	const type = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
 	if (type !== TYPE && type !== "application/json") throw new ScimError(415, undefined, `Use ${TYPE}`);
-	const source = await text(request);
+	if (Number(request.headers.get("content-length")) > MAX_BODY_BYTES) throw new ScimError(413);
+	const source = await readBody(request);
+	if (source === undefined) throw new ScimError(413);
 	try {
 		return JSON.parse(source);
 	} catch {

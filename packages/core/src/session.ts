@@ -9,6 +9,9 @@ import type { SessionRegistry, SessionScope } from "./registry.js";
 import { sealValue, unsealValue } from "./seal.js";
 
 export const REFRESH_LEEWAY_SECONDS = 30;
+const activitySchema = z.object({
+	sid: z.string(), issuer: z.string(), clientId: z.string(), lastSeenAt: z.number(),
+});
 const sessionSchema = z.object({
 	version: z.literal(2),
 	clientId: z.string().min(1),
@@ -47,7 +50,11 @@ export function createSessionManager({
 			...cookieOptions(), maxAge: maxAgeSeconds,
 		});
 	}
-	const clear = (cookies: Map<string, string>) => clearChunked(cookies, name(), cookieOptions());
+	// An idle update can arrive after a refresh. Give it a separate cookie so it can only update activity.
+	const activityName = () => name() + "-activity";
+	const clear = (cookies: Map<string, string>) => [
+		...clearChunked(cookies, name(), cookieOptions()), ...clearChunked(cookies, activityName(), cookieOptions()),
+	];
 	const isAllowed = async (user: Session["user"]) => (await allowSession(user)) === true;
 	const key = (session: Session) => ({ issuer: session.user.issuer, clientId: session.clientId, sid: session.sid });
 	const absent = (reason: SessionReason, setCookies: string[] = []): SessionResolution => ({ status: "anonymous", reason, session: null, setCookies });
@@ -60,6 +67,14 @@ export function createSessionManager({
 		catch { return absent("invalid_session", clear(cookies)); }
 		const expected = scope();
 		if (session.user.issuer !== expected.issuer || session.clientId !== expected.clientId) return absent("invalid_session", clear(cookies));
+		const activity = purpose === "access" && readChunked(cookies, activityName());
+		if (activity) {
+			try {
+				const seen = activitySchema.parse(await unsealValue(activity, password(), idleSeconds));
+				if (seen.sid === session.sid && seen.issuer === expected.issuer && seen.clientId === expected.clientId)
+					session.lastSeenAt = Math.max(session.lastSeenAt, seen.lastSeenAt);
+			} catch { /* A missing, expired or invalid activity stamp leaves the credential cookie's timestamp in force. */ }
+		}
 		const now = Math.floor(Date.now() / 1000);
 		if (now >= session.issuedAt + maxAgeSeconds || (purpose === "access" && now > session.lastSeenAt + idleSeconds)) return absent("session_expired", clear(cookies));
 		try {
@@ -94,8 +109,9 @@ export function createSessionManager({
 		if (session.expiresAt - now > REFRESH_LEEWAY_SECONDS) {
 			const allowed = await policy(session, report);
 			if (allowed.status !== "authenticated" || now - session.lastSeenAt < touchAfterSeconds) return allowed;
-			const touched = { ...session, lastSeenAt: now };
-			return { status: "authenticated", session: touched, setCookies: await write(cookies, touched) };
+			const stamp = await sealValue({ ...key(session), lastSeenAt: now }, password(), idleSeconds);
+			return { status: "authenticated", session: { ...session, lastSeenAt: now },
+				setCookies: writeChunked(cookies, activityName(), stamp, { ...cookieOptions(), maxAge: idleSeconds }) };
 		}
 		if (!session.refreshToken) return absent("reauth_required", clear(cookies));
 		let fresh;

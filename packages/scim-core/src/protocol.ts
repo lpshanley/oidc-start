@@ -64,8 +64,9 @@ const userResource = z.preprocess(
 		{ error: "Expected a JSON object" },
 	),
 );
+const groupKeys = keysNamed(["displayName", "externalId", "members"]);
 const groupResource = z.preprocess(
-	keysNamed(["displayName", "externalId", "members"]),
+	groupKeys,
 	z.object(
 		{ displayName, externalId: text, members: z.unknown().optional() },
 		{ error: "Expected a JSON object" },
@@ -291,8 +292,9 @@ export function replaceUser(current: ScimUserFields, body: unknown): ScimUserFie
 	};
 }
 
+export const operationKeys = keysNamed(["op", "path", "value"]);
 const operation = z.preprocess(
-	keysNamed(["op", "path", "value"]),
+	operationKeys,
 	z.looseObject(
 		{ op: z.unknown().optional(), path: z.unknown().optional(), value: z.unknown().optional() },
 		{ error: "Each operation must be an object" },
@@ -428,7 +430,7 @@ export function patchGroup(body: unknown): ScimGroupChange[] {
 		else if ((op === "replace" || op === "add") && /^displayName$/i.test(path))
 			patch.push({ kind: "rename", displayName: read(displayName, o.value) });
 		else if ((op === "replace" || op === "add") && !path) {
-			const v = read(jsonObject, o.value);
+			const v = read(jsonObject, groupKeys(o.value));
 			if (v.displayName !== undefined)
 				patch.push({ kind: "rename", displayName: read(displayName, v.displayName) });
 			if (v.externalId !== undefined) patch.push({ kind: "externalId", externalId: read(externalId, v.externalId) });

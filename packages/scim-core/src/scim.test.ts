@@ -547,3 +547,28 @@ test("a host's extra user fields reach its hooks", async () => {
 	await scim.forConnection("acme").users.deactivate(user.id);
 	expect(seen).toHaveBeenCalledWith("sub-a");
 });
+
+test("replacing group attributes accepts alternate spellings and preserves canonical precedence", async () => {
+	const idp = createTestProvider(setup().scim, { dialect: "okta" });
+	const alice = await idp.createUser({ userName: "alice" });
+	const group = await idp.createGroup("ops", [alice]);
+	const response = await idp.send("PATCH", "/Groups/" + group.id, {
+		Operations: [{ op: "replace", value: { Members: [], DISPLAYNAME: "ignored", displayName: "keepers", EXTERNALID: "updated" } }],
+	});
+	expect(response.status).toBe(200);
+	expect(await idp.getGroup(group.id)).toMatchObject({ members: [], displayName: "keepers", externalId: "updated" });
+});
+
+test("a body over the limit answers 413 while a host still owns a copy", async () => {
+	const { scim } = setup();
+	const body = new ReadableStream<Uint8Array>({
+		start(controller) { controller.enqueue(new Uint8Array((1 << 20) + 1)); },
+	});
+	const request = new Request(url("/Users"), { method: "POST", headers: bodyHeaders, body, duplex: "half" } as RequestInit);
+	const copy = request.clone();
+	try {
+		expect((await scim.handle(request)).status).toBe(413);
+	} finally {
+		await copy.body?.cancel();
+	}
+}, 1500);

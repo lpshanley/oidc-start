@@ -78,7 +78,7 @@ describe("provider", () => {
 			new URL(settings.OIDC_ISSUER),
 			"sage-web",
 			"secret",
-			undefined,
+			expect.any(Function),
 			{ timeout: 5, [oidc.customFetch]: expect.any(Function) },
 		);
 		expect(Object.fromEntries(url.searchParams)).toEqual({
