@@ -66,6 +66,8 @@ export const oidcConfigurationSchema = z.object({
 			error: "Missing required environment variable: OIDC_CLIENT_SECRET",
 		})
 		.min(1, "Missing required environment variable: OIDC_CLIENT_SECRET"),
+	/** Client authentication method from its provider registration. */
+	OIDC_TOKEN_ENDPOINT_AUTH_METHOD: z.enum(["client_secret_basic", "client_secret_post"]).optional(),
 	/** Space-separated scopes; offline_access requests a refresh token. */
 	OIDC_SCOPES: z.preprocess(
 		(value) => (value === "" ? undefined : value),

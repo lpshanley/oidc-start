@@ -61,14 +61,16 @@ export function oidcMiddleware(setup: OidcMiddlewareSetup) {
 				appendSetCookie: (line) => appended.push(line),
 				discardSessionUpdates: () => { sessionUpdates = []; },
 			};
-			const result = await next({ context: { oidc } });
-			const pending = [...sessionUpdates, ...appended];
-			if (pending.length) {
-				// Start must receive its original response to serialize RPC redirects.
-				const { appendResponseHeader } = await import("@tanstack/react-start/server");
-				appendResponseHeader("Set-Cookie", pending);
+			try {
+				return await next({ context: { oidc } });
+			} finally {
+				const pending = [...sessionUpdates, ...appended];
+				if (pending.length) {
+					// Start applies these headers to its final response, including errors and RPC redirects.
+					const { appendResponseHeader } = await import("@tanstack/react-start/server");
+					appendResponseHeader("Set-Cookie", pending);
+				}
 			}
-			return result;
 		},
 	);
 }

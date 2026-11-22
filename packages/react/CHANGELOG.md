@@ -1,5 +1,13 @@
 # @lpshanley/oidc-start-react
 
+## 0.7.2
+
+### Patch Changes
+
+- e631865: Session cookie updates reach TanStack Start error responses when downstream application code throws.
+- Updated dependencies [e631865]
+  - @lpshanley/oidc-start-core@0.7.2
+
 ## 0.7.1
 
 ### Patch Changes

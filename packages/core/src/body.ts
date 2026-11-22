@@ -44,14 +44,14 @@ export async function readFormBody(
 		for (;;) {
 			const next = await Promise.race([reader.read(), stopped]);
 			if (next === "stopped") {
-				await reader.cancel().catch(() => {});
+				void reader.cancel().catch(() => {});
 				return undefined;
 			}
 			const { done, value } = next;
 			if (done) break;
 			size += value.byteLength;
 			if (size > maxBytes) {
-				await reader.cancel().catch(() => {});
+				void reader.cancel().catch(() => {});
 				return undefined;
 			}
 			chunks.push(value);
@@ -59,6 +59,7 @@ export async function readFormBody(
 	} catch {
 		return undefined;
 	} finally {
+		reader.releaseLock();
 		clearTimeout(timer);
 		signal?.removeEventListener("abort", stop);
 	}

@@ -108,6 +108,7 @@ export function createOidcCore(options: OidcMiddlewareOptions) {
 			config.OIDC_ISSUER,
 			config.OIDC_CLIENT_ID,
 			config.OIDC_CLIENT_SECRET,
+			config.OIDC_TOKEN_ENDPOINT_AUTH_METHOD,
 			config.OIDC_SCOPES,
 			config.OIDC_ROLES_CLAIM,
 		]);

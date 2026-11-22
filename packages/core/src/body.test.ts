@@ -127,3 +127,13 @@ describe("readFormBody", () => {
 		expect(await readFormBody(post(body), { timeoutMs: 20 })).toBeUndefined();
 	});
 });
+
+test("an aborted form read settles while another consumer owns the clone", async () => {
+	const request = post(new ReadableStream<Uint8Array>());
+	const copy = request.clone();
+	try {
+		expect(await readFormBody(request, { signal: AbortSignal.abort() })).toBeUndefined();
+	} finally {
+		await copy.body?.cancel();
+	}
+}, 1500);

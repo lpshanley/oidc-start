@@ -131,3 +131,59 @@ test("a recording that fails does not change the answer", async () => {
 	const idp = createTestProvider(scim, { dialect: "okta" });
 	expect((await idp.findUser("a@x.test")).totalResults).toBe(0);
 });
+
+test.each(["path", "Path", "PATH"])("recordings redact PATCH values addressed by %s", async (key) => {
+	const entries: ScimExchange[] = [];
+	const idp = createTestProvider(recordTraffic(instance(), { onExchange: (e) => entries.push(e) }), { dialect: "okta" });
+	const user = await idp.createUser({ userName: "fixture" });
+	await idp.send("PATCH", "/Users/" + user.id, { Operations: [
+		{ Op: "replace", [key]: "password", Value: "fixture-marker" },
+		{ Op: "replace", [key]: "userName", VALUE: "renamed@example.test" },
+	] });
+	const recorded = JSON.stringify(entries.at(-1));
+	expect(recorded).toContain("redacted");
+	expect(recorded).not.toMatch(/fixture-marker|renamed@example/);
+});
+
+test("PATCH selectors use the same placeholders as the contacts they select", async () => {
+	const entries: ScimExchange[] = [];
+	const idp = createTestProvider(recordTraffic(instance(), { onExchange: (e) => entries.push(e) }), { dialect: "okta" });
+	const user = await idp.createUser({ userName: "selector@example.test" });
+	await idp.send("PATCH", "/Users/" + user.id, { Operations: [
+		{ op: "remove", path: 'emails[value eq "selector@example.test"]' },
+	] });
+	const recorded = JSON.stringify(entries);
+	expect(recorded).not.toContain("selector@example.test");
+	expect(entries.at(-1)?.body).toMatchObject({ Operations: [{ path: 'emails[value eq "person-1"]' }] });
+	expect(await replayTraffic(instance(), entries)).toEqual([]);
+});
+
+test("an oversized upload returns 413 through the recorder and omits its body", async () => {
+	const entries: ScimExchange[] = [];
+	const scim = recordTraffic(instance(), { onExchange: (e) => entries.push(e) });
+	const chunks = [new Uint8Array(1 << 20), Uint8Array.of(1), Uint8Array.of(2), Uint8Array.of(3)];
+	const body = new ReadableStream<Uint8Array>({
+		pull(controller) {
+			const next = chunks.shift();
+			if (next) controller.enqueue(next);
+			else controller.close();
+		},
+	});
+	const response = await scim.handle(new Request("https://app.test/scim/v2/Users", {
+		method: "POST", headers: { authorization: "Bearer test-token", "content-type": "application/scim+json" },
+		body, duplex: "half",
+	} as RequestInit));
+	expect(response.status).toBe(413);
+	expect(entries.map((e) => [e.status, e.body])).toEqual([[413, undefined]]);
+}, 1500);
+
+test("a refused PATCH scrubs the selector echoed in the SCIM error", async () => {
+	const entries: ScimExchange[] = [];
+	const idp = createTestProvider(recordTraffic(instance(), { onExchange: (e) => entries.push(e) }), { dialect: "okta" });
+	const group = await idp.createGroup("fixture");
+	const response = await idp.send("PATCH", "/Groups/" + group.id, { Operations: [
+		{ op: "remove", path: 'emails[value eq "sample@example.test"]' },
+	] });
+	expect(response.status).toBe(400);
+	expect(JSON.stringify(entries.at(-1))).not.toContain("sample@example.test");
+});

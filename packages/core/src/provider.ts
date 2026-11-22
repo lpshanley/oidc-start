@@ -144,7 +144,14 @@ export function createProvider(
 				issuer,
 				settings.OIDC_CLIENT_ID,
 				settings.OIDC_CLIENT_SECRET,
-				undefined,
+				(server, metadata, body, headers) => {
+					const supported = server.token_endpoint_auth_methods_supported ?? ["client_secret_basic"];
+					const method = settings.OIDC_TOKEN_ENDPOINT_AUTH_METHOD
+						?? (supported.includes("client_secret_post") ? "client_secret_post" : "client_secret_basic");
+					if (!supported.includes(method)) throw new Error(`Issuer does not advertise ${method} for token endpoint authentication`);
+					const authenticate = method === "client_secret_basic" ? client.ClientSecretBasic : client.ClientSecretPost;
+					return authenticate(settings.OIDC_CLIENT_SECRET)(server, metadata, body, headers);
+				},
 				{
 					[client.customFetch]: boundedFetch,
 					timeout: Math.max(1, Math.ceil(timeoutMs / 1000)),

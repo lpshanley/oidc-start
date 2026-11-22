@@ -13,6 +13,7 @@ Use Node.js 22.12 or newer, ES modules, and a confidential authorization-code cl
 | `APP_ORIGIN` | Canonical public origin, such as `https://app.example.com`. |
 | `OIDC_ISSUER` | Exact discovery issuer, including tenant path and trailing slash when applicable. |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Registered confidential client credentials. |
+| `OIDC_TOKEN_ENDPOINT_AUTH_METHOD` | Set to the client's registered `client_secret_basic` or `client_secret_post`. With no setting, discovery selects POST when advertised, otherwise Basic. Omitted provider metadata defaults to Basic. |
 | `SESSION_SECRET` | Persistent sealing secret, at least 32 characters, shared by every replica. |
 | `OIDC_SCOPES` | Defaults to `openid profile email offline_access`. Email remains optional. |
 | `OIDC_ROLES_CLAIM` | Defaults to `roles`; absent roles become an empty list. |

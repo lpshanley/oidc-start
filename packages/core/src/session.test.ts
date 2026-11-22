@@ -213,3 +213,18 @@ test.each(["registry", "policy"])("preserves a completed rotation through a subs
   expect((await manager.resolve(cookies)).status).toBe("authenticated");
   expect(refresh).toHaveBeenCalledOnce();
 });
+
+test("a delayed idle touch keeps the credentials from a completed refresh", async () => {
+	const { manager, jar } = setup({ idleSeconds: 600 });
+	const browser = await jar();
+	vi.setSystemTime(1_260_000);
+	const activity = await manager.resolve(browser);
+	vi.setSystemTime(1_280_000);
+	const renewed = await manager.resolve(browser);
+	apply(browser, renewed.setCookies);
+	apply(browser, activity.setCookies);
+	vi.setSystemTime(1_300_000);
+	const next = await manager.resolve(browser);
+	expect(next.status).toBe("authenticated");
+	expect(next.session?.accessToken).toBe("next");
+});
